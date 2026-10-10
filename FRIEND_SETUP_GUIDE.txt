@@ -1,0 +1,489 @@
+HOSTEL HUB - COMPLETE CLONE, INSTALLATION AND LOGIN GUIDE
+========================================================
+
+Last updated: 10 October 2026
+
+This guide is for running the project locally on another computer after cloning
+or copying the hostel-hub project folder.
+
+IMPORTANT
+---------
+
+1. All listed accounts, properties and payments are fictional demo data.
+2. Demo payment screens never transfer money and need no bank credentials.
+3. Do not put real passwords, API keys, identity documents or payment details in
+   the repository.
+4. The recommended local database is SQLite. It is included in Node.js, so no
+   separate database server is required.
+5. Node.js 24 or newer is required. Node 20 and older will not run this project.
+
+
+1. SOFTWARE TO INSTALL
+======================
+
+Required:
+
+- Git: https://git-scm.com/downloads
+- Node.js 24 LTS or newer: https://nodejs.org/
+- A modern browser such as Microsoft Edge, Chrome or Firefox
+- A code editor such as Visual Studio Code (recommended, but optional)
+
+Check the installation in a new terminal:
+
+    node --version
+    npm --version
+    git --version
+
+The Node result must start with v24 or a higher major version.
+
+Optional:
+
+- Microsoft Edge is needed only for `npm run test:browser` because the browser
+  test currently uses the Edge Playwright channel.
+- MySQL 8 is supported by the adapter but is not needed for normal local use.
+- An OpenAI-compatible API key is optional. Without it, the built-in local
+  hostel search assistant works normally.
+
+
+2. GET THE PROJECT
+==================
+
+If the project is in a Git repository, replace <REPOSITORY_URL> with the URL
+provided by the project owner:
+
+    git clone <REPOSITORY_URL>
+    cd hostel-hub
+
+If the project is shared as a ZIP file:
+
+1. Extract the ZIP.
+2. Open a terminal in the extracted hostel-hub folder.
+3. Confirm that package.json, package-lock.json, server, src, public and
+   seed-data are present.
+
+Do not copy another person's node_modules, data, uploads, dist, .env or backups
+folders. They are machine-specific/runtime files and are not required for a
+fresh setup.
+
+
+3. INSTALL ALL PROJECT DEPENDENCIES
+===================================
+
+From the hostel-hub folder, run:
+
+    npm ci
+
+Use `npm ci`, rather than installing packages one by one. It uses the committed
+package-lock.json and installs the exact dependency tree expected by the app.
+
+Runtime dependencies installed automatically:
+
+- bcryptjs 3.x                 Password hashing
+- cookie-parser 1.x            Session cookie parsing
+- dotenv 17.x                  Local environment configuration
+- express 5.x                  Backend HTTP server and API
+- express-rate-limit 8.x       Request throttling
+- helmet 8.x                   HTTP security headers
+- jsonwebtoken 9.x             Signed login sessions
+- leaflet 1.x                  Map display
+- lucide-react 0.x             Interface icons
+- multer 2.x                   Photo/document upload handling
+- mysql2 3.x                   Optional MySQL adapter
+- react 19.x                   Frontend UI
+- react-dom 19.x               React browser rendering
+- react-router-dom 7.x         Frontend routing
+- zod 4.x                      API input validation
+
+Development/test dependencies installed automatically:
+
+- @playwright/test 1.x         Browser workflow tests
+- @types/leaflet 1.x           Leaflet TypeScript types
+- @types/react 19.x            React TypeScript types
+- @types/react-dom 19.x        React DOM TypeScript types
+- @vitejs/plugin-react 5.x     React/Vite integration
+- concurrently 9.x             Runs API and frontend together in development
+- prettier 3.x                 Code formatting
+- supertest 7.x                API integration testing
+- typescript 5.x               Static type checking
+- vite 7.x                     Frontend development/build tool
+
+The exact installed versions are controlled by package-lock.json.
+
+
+4. ENVIRONMENT CONFIGURATION
+============================
+
+No .env file is required for the standard local demo. The defaults use SQLite,
+port 4000 and simulated payments.
+
+To use explicit settings, copy the example file:
+
+Windows PowerShell:
+
+    Copy-Item .env.example .env
+
+macOS/Linux:
+
+    cp .env.example .env
+
+Recommended local .env contents:
+
+    PORT=4000
+    APP_ORIGIN=http://localhost:5173
+    DB_CLIENT=sqlite
+    DATABASE_PATH=./data/hostel-hub.sqlite
+    JWT_SECRET=
+    DEMO_MODE=true
+    AI_API_KEY=
+    AI_API_URL=https://api.openai.com/v1/chat/completions
+    AI_MODEL=gpt-4.1-mini
+
+Meaning of the important values:
+
+- DB_CLIENT=sqlite uses the zero-install local database.
+- DATABASE_PATH selects the local database file.
+- DEMO_MODE=true enables safe simulated payments and subscriptions.
+- A blank JWT_SECRET is allowed in local development. Sessions will reset when
+  the server restarts. To preserve sessions, generate and use your own random
+  value of at least 32 characters. Never commit it.
+- AI_API_KEY can stay blank. The local search assistant will be used.
+- Do not set DEMO_MODE=false expecting real payments. Real payment processing is
+  not configured by this project.
+
+
+5. FIRST START - EASIEST METHOD
+===============================
+
+Windows PowerShell:
+
+    .\Start-HostelHub.ps1
+
+The launcher selects Node 24+, runs `npm ci` if node_modules is missing, builds
+the frontend if dist is missing, creates the SQLite schema, imports the demo CSV
+dataset and starts the server.
+
+Open this address:
+
+    http://localhost:4000
+
+Keep the terminal open. Press Ctrl+C in that terminal to stop the application.
+
+
+6. FIRST START - PORTABLE METHOD
+================================
+
+This method works in Windows PowerShell, Command Prompt, macOS and Linux:
+
+    npm ci
+    npm run build
+    npm start
+
+Then open:
+
+    http://localhost:4000
+
+On the first non-production start, the application automatically creates:
+
+- data/hostel-hub.sqlite
+- the complete database schema and migrations
+- 10 independent owners
+- 60 guest accounts
+- 24 CSV properties plus room, booking, payment and history data
+- sample private demo declaration files under uploads/private
+
+Startup is idempotent: restarting the server does not duplicate imported rows.
+
+
+7. DEVELOPMENT MODE
+===================
+
+Windows:
+
+    .\Start-HostelHub.ps1 -Dev
+
+Portable command:
+
+    npm run dev
+
+Open:
+
+    http://127.0.0.1:5173
+
+Development mode uses Vite on port 5173 and proxies API/upload requests to the
+backend on port 4000. Use one hostname consistently so login cookies remain on
+the expected origin.
+
+
+8. DEMO LOGINS AND PASSWORDS
+============================
+
+Shared password for every generated demo account:
+
+    HostelHub@123
+
+Main accounts:
+
+    Guest:  resident.001@hostelhub.test
+    Owner:  priya.raman@hostelhub.test
+    Admin:  admin@hostelhub.test
+
+Independent owner accounts:
+
+    priya.raman@hostelhub.test
+    arjun.menon@hostelhub.test
+    kavitha.narayanan@hostelhub.test
+    rohan.deshmukh@hostelhub.test
+    nandini.rao@hostelhub.test
+    vikram.iyer@hostelhub.test
+    meera.shah@hostelhub.test
+    sanjay.reddy@hostelhub.test
+    ananya.krishnan@hostelhub.test
+    farhan.ahmed@hostelhub.test
+
+Each owner has an independent login and can access only their own properties,
+bookings, residents, messages, documents and financial records.
+
+Generated guest accounts:
+
+    resident.001@hostelhub.test through resident.060@hostelhub.test
+
+resident.060@hostelhub.test is intentionally suspended for access-control
+testing. Use resident.001@hostelhub.test for normal testing.
+
+Compatibility accounts retained for older test data:
+
+    user@hostelhub.test
+    owner@hostelhub.test
+
+They use the same password: HostelHub@123
+
+The login page also contains demo account shortcuts and an owner selector.
+
+
+9. COMPLETE BOOKING AND PAYMENT TEST
+====================================
+
+1. Sign in as resident.001@hostelhub.test.
+2. Open a published property belonging to Priya Raman.
+3. Select a room, bed quantity and dates that meet the displayed minimum stay.
+4. Submit the booking request.
+5. Sign out and sign in as priya.raman@hostelhub.test.
+6. Open Booking Requests and approve the new request.
+7. Sign back in as the guest and open the booking checkout.
+8. Select Card and choose "Decline payment to test retry" if you want to test a
+   failure. No payment will be recorded.
+9. Retry using UPI/Card/Net banking and choose "Approve payment".
+10. The booking becomes confirmed. Download the HTML receipt if required.
+11. Cancel the booking to create a refund request.
+12. Sign in as admin@hostelhub.test and process the simulated refund.
+
+The request deadline and payment deadline are each 24 hours. Checkout collects
+the first month's discounted rent, deposit, first-month food/services and any
+configured tax. Later monthly payments are displayed but not auto-debited.
+
+
+10. CSV DATA MANAGEMENT
+=======================
+
+Editable source files are under seed-data/. Do not change IDs without updating
+every related CSV file.
+
+Validate CSV files without changing the database:
+
+    npm run db:validate
+
+Apply approved CSV edits to the current database:
+
+    npm run db:seed
+
+Stop the running server and back up data/ and uploads/ before an explicit import.
+The importer is transactional, validates relationships and amounts, and protects
+application-edited records from being silently overwritten.
+
+Create a completely separate fresh database:
+
+    npm run db:fresh -- realistic-demo-2.sqlite
+
+Then set this in .env and restart:
+
+    DATABASE_PATH=./data/realistic-demo-2.sqlite
+
+The command refuses to overwrite an existing database. Detailed CSV rules are
+in docs/CSV-DATA-GUIDE.md.
+
+
+11. BUILD AND TEST COMMANDS
+===========================
+
+Production frontend build and TypeScript check:
+
+    npm run build
+
+All API, workflow, concurrency and CSV import tests:
+
+    npm test
+
+Build plus automated tests:
+
+    npm run check
+
+Full Edge browser walkthrough and screenshots:
+
+    npm run test:browser
+
+Format source files:
+
+    npm run format
+
+Tests use isolated temporary databases and do not modify the normal application
+database. Browser screenshots are written to test-results/.
+
+
+12. CREATE A NEW ADMINISTRATOR (OPTIONAL)
+=========================================
+
+Do not hard-code a real administrator password in any tracked file. Supply it
+temporarily through environment variables.
+
+Windows PowerShell example:
+
+    $env:ADMIN_NAME='Local Administrator'
+    $env:ADMIN_EMAIL='admin2@example.test'
+    $env:ADMIN_PASSWORD='Choose-A-Strong-Unique-Password'
+    npm run admin:create
+    Remove-Item Env:ADMIN_NAME, Env:ADMIN_EMAIL, Env:ADMIN_PASSWORD
+
+The password must meet the server's validation requirements. Use a unique value
+for any non-demo environment.
+
+
+13. OPTIONAL MYSQL CONFIGURATION
+================================
+
+SQLite is recommended and fully tested for this local project. If MySQL 8 is
+already available, create an empty database and restricted application user,
+then configure .env:
+
+    DB_CLIENT=mysql
+    DATABASE_URL=mysql://USERNAME:URL_ENCODED_PASSWORD@localhost:3306/hostel_hub
+
+Never commit the real DATABASE_URL. The MySQL adapter is included, but SQLite is
+the tested default and the simplest setup for another developer.
+
+
+14. OPTIONAL AI CONFIGURATION
+=============================
+
+The app works without an external AI account. To use an OpenAI-compatible
+provider, place values only in the untracked .env file:
+
+    AI_API_KEY=your-private-key
+    AI_API_URL=https://api.openai.com/v1/chat/completions
+    AI_MODEL=a-model-available-to-your-account
+
+Restart the server after changing .env. Never send or commit the key. The live
+provider path depends on the selected account/provider and is optional.
+
+
+15. BACKUP AND RESET INFORMATION
+================================
+
+Persistent local data:
+
+    data/hostel-hub.sqlite
+    data/hostel-hub.sqlite-wal (may exist while running)
+    data/hostel-hub.sqlite-shm (may exist while running)
+    uploads/
+
+Stop the server before copying data/ and uploads/ for a consistent backup.
+
+For a fresh demo, use the safe separate-database command in section 10. Do not
+delete or overwrite someone else's database unless they explicitly want that.
+
+
+16. COMMON PROBLEMS
+===================
+
+Problem: Node reports ERR_UNKNOWN_BUILTIN_MODULE for node:sqlite.
+Solution: Install/select Node.js 24 or newer and reopen the terminal.
+
+Problem: Windows blocks Start-HostelHub.ps1 because of execution policy.
+Solution: Use the portable commands `npm ci`, `npm run build`, and `npm start`,
+          or run the script only under an execution policy approved for that
+          computer. Administrator access is not otherwise required.
+
+Problem: Port 4000 is already in use.
+Solution: Stop the other process or set another port in .env, for example
+          PORT=4100, then open http://localhost:4100.
+
+Problem: `npm ci` reports package-lock mismatch.
+Solution: Make sure package.json and package-lock.json came from the same commit.
+          Do not manually edit package-lock.json.
+
+Problem: Login stops working after restarting the server.
+Solution: Set a private JWT_SECRET of at least 32 characters in .env, then log in
+          again. A blank local secret is regenerated on every restart.
+
+Problem: The map tiles are blank.
+Solution: The listing data still works; OpenStreetMap tiles need internet access.
+
+Problem: Payment asks for real credentials.
+Solution: Stop. In the intended local setup DEMO_MODE must be true, and checkout
+          should explicitly say "Demo payment - no money transferred".
+
+Problem: Seed changes do not appear after editing CSV files.
+Solution: Stop the app, back up runtime data, run `npm run db:validate`, then
+          `npm run db:seed`, and restart. Startup only performs the initial import.
+
+Problem: `npm run test:browser` cannot launch a browser.
+Solution: Install Microsoft Edge or update the Playwright channel in
+          scripts/browser-qa.mjs for an installed supported browser.
+
+
+17. FILES THAT MUST BE INCLUDED WHEN SHARING THE PROJECT
+========================================================
+
+Include:
+
+- package.json and package-lock.json
+- Start-HostelHub.ps1
+- .env.example
+- server/
+- src/
+- public/
+- seed-data/
+- scripts/
+- tests/
+- docs/
+- index.html, tsconfig.json and vite.config.ts
+- Dockerfile and compose.yaml if deployment experimentation is required
+- README.md and this FRIEND_SETUP_GUIDE.txt
+
+Normally exclude:
+
+- node_modules/
+- dist/
+- data/
+- uploads/
+- backups/
+- test-results/
+- .env and every real secret/API key
+
+These exclusions already appear in .gitignore where applicable. A fresh clone
+can recreate dependencies, build output, the SQLite database and demo uploads.
+
+
+18. FINAL QUICK START CHECKLIST
+===============================
+
+    1. Install Git and Node.js 24+.
+    2. Clone/extract the project and enter the hostel-hub directory.
+    3. Run: npm ci
+    4. Run: npm run build
+    5. Run: npm test
+    6. Run: npm start
+    7. Open: http://localhost:4000
+    8. Login: resident.001@hostelhub.test / HostelHub@123
+
+No MySQL installation, payment credentials or AI key is required for this
+standard local setup.

@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "reference_date": "2026-10-10",
+  "synthetic": true,
+  "description": "Fictional people and properties. Approximate neighbourhood coordinates; illustrative photos. Amounts are integer INR.",
+  "counts": {
+    "owners": 40,
+    "guests": 60,
+    "hostels": 44,
+    "rooms": 176,
+    "hostel_photos": 132,
+    "hostel_amenities": 249,
+    "documents": 43,
+    "bookings": 480,
+    "payment_attempts": 541,
+    "payments": 376,
+    "booking_events": 1733,
+    "reviews": 200,
+    "messages": 320,
+    "notifications": 1000,
+    "complaints": 40,
+    "audit_log": 688,
+    "wishlist": 60
+  }
+}
