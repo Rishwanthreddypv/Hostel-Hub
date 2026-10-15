@@ -7,11 +7,13 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import { randomUUID, randomBytes } from "node:crypto";
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { resolve, join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { now } from "./seed.js";
 import { installPayments } from "./payments.js";
 import { installPortfolio } from "./portfolio.js";
+import { PLAN_NAMES, PLANS, planFor, publicPlans } from "./plans.js";
 import {
   bookingRows,
   bookingStatus,
@@ -20,6 +22,7 @@ import {
 } from "./booking-workflow.js";
 
 const id = () => randomUUID();
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const fail = (status, message) => {
   const e = new Error(message);
   e.status = status;
@@ -144,7 +147,9 @@ export function createApp(db, options = {}) {
     throw new Error("Set a strong JWT_SECRET in production");
   const secret =
     options.secret || process.env.JWT_SECRET || randomBytes(48).toString("hex");
-  const uploads = resolve(options.uploads || "uploads");
+  const uploads = options.uploads
+    ? resolve(options.uploads)
+    : join(projectRoot, "uploads");
   mkdirSync(uploads, { recursive: true });
   mkdirSync(join(uploads, "private"), { recursive: true });
   app.disable("x-powered-by");
@@ -262,6 +267,7 @@ export function createApp(db, options = {}) {
     res.json({
       demo,
       facilities: facilityNames,
+      plans: publicPlans(),
       assistant: process.env.AI_API_KEY ? "ai" : "local",
       payments: demo ? "demo" : "disabled",
       demo_accounts: demo
@@ -420,7 +426,7 @@ export function createApp(db, options = {}) {
     let list = await Promise.all(
       (
         await db.all(
-          "SELECT h.*, u.plan as owner_plan FROM hostels h JOIN users u ON u.id=h.owner_id WHERE h.status='approved' AND u.status='active' ORDER BY CASE WHEN u.plan = 'Pro' THEN 1 ELSE 2 END, h.created_at DESC",
+          "SELECT h.*, u.plan as owner_plan FROM hostels h JOIN users u ON u.id=h.owner_id WHERE h.status='approved' AND u.status='active' ORDER BY CASE WHEN u.plan = 'Advanced' THEN 1 ELSE 2 END, h.created_at DESC",
         )
       ).map((h) => enrich(h, q.start, q.end)),
     );
@@ -466,7 +472,11 @@ export function createApp(db, options = {}) {
           ? (a, b) => b.min_rent - a.min_rent
           : q.sort === "rating"
             ? (a, b) => b.rating - a.rating
-            : (a, b) => b.discount - a.discount || b.rating - a.rating,
+            : (a, b) =>
+                planFor(b.owner_plan).searchPriority -
+                  planFor(a.owner_plan).searchPriority ||
+                b.discount - a.discount ||
+                b.rating - a.rating,
     );
     res.json({ hostels: list });
   });
@@ -982,7 +992,8 @@ export function createApp(db, options = {}) {
   });
   app.post("/api/owner/hostels", auth("owner"), async (req, res) => {
     const hostelCount = (await db.get("SELECT COUNT(*) AS c FROM hostels WHERE owner_id=?", [req.user.id])).c;
-    const maxProperties = req.user.plan === "Pro" ? 10 : 1;
+    const ownerPlan = planFor(req.user.plan);
+    const maxProperties = ownerPlan.maxProperties;
     if (hostelCount >= maxProperties) fail(403, `Your ${req.user.plan} plan allows up to ${maxProperties} properties.`);
     const { rooms, ...data } = z
       .object({
@@ -990,8 +1001,10 @@ export function createApp(db, options = {}) {
         rooms: z.array(roomSchema).min(1).max(12),
       })
       .parse(req.body);
-    const maxPhotos = req.user.plan === "Pro" ? 200 : 8;
+    const maxPhotos = ownerPlan.maxPhotosPerProperty;
     if (data.photos.length > maxPhotos) fail(400, `Your ${req.user.plan} plan allows up to ${maxPhotos} photos.`);
+    if (!ownerPlan.specialOffers && data.discount > 0)
+      fail(403, "Special offers are available on the Advanced plan");
     const hostelId = id();
     await db.transaction(async (tx) => {
       await tx.run(
@@ -1041,12 +1054,17 @@ export function createApp(db, options = {}) {
   });
   app.patch("/api/owner/hostels/:id", auth("owner"), async (req, res) => {
     const h = await owned(req, req.params.id);
-    const maxPhotos = req.user.plan === "Pro" ? 200 : 8;
+    const ownerPlan = planFor(req.user.plan);
+    const maxPhotos = ownerPlan.maxPhotosPerProperty;
     const d = hostelSchema
       .omit({ photos: true })
-      .extend({ photos: z.array(z.string()).max(maxPhotos) })
+      .extend({ photos: z.array(z.string()).max(200) })
       .parse(req.body);
     const old = JSON.parse(h.photos);
+    if (d.photos.length > maxPhotos && d.photos.length > old.length)
+      fail(400, `Your ${req.user.plan} plan allows up to ${maxPhotos} photos. Existing photos are preserved, but new photos cannot be added.`);
+    if (!ownerPlan.specialOffers && d.discount > 0 && d.discount > h.discount)
+      fail(403, "Special offers are available on the Advanced plan");
     if (
       d.photos.some(
         (p) =>
@@ -1189,35 +1207,113 @@ export function createApp(db, options = {}) {
     });
     res.json({ ok: true });
   });
+  app.get("/api/owner/subscription-attempts", auth("owner"), async (req, res) => {
+    res.json({
+      attempts: await db.all(
+        "SELECT * FROM subscription_attempts WHERE owner_id=? ORDER BY created_at DESC LIMIT 20",
+        [req.user.id],
+      ),
+    });
+  });
+  app.post("/api/owner/subscription-attempts", auth("owner"), async (req, res) => {
+    if (!demo) fail(503, "Demo subscriptions are disabled");
+    const d = z
+      .object({
+        plan: z.literal("Advanced"),
+        method: z.enum(["upi", "card", "netbanking"]),
+        outcome: z.enum(["success", "failure"]),
+        idempotency_key: z.string().uuid(),
+      })
+      .strict()
+      .parse(req.body);
+    if (req.user.plan === d.plan) fail(409, "You are already on this plan");
+    const attempt = await db.transaction(async (tx) => {
+      const prior = await tx.get("SELECT * FROM subscription_attempts WHERE idempotency_key=?", [d.idempotency_key]);
+      if (prior) {
+        if (prior.owner_id !== req.user.id || prior.plan_code !== d.plan || prior.method !== d.method || prior.outcome !== d.outcome)
+          fail(409, "This request key was already used for a different subscription payment");
+        return prior;
+      }
+      const running = await tx.get("SELECT * FROM subscription_attempts WHERE owner_id=? AND status='processing'", [req.user.id]);
+      if (running) return running;
+      const at = now();
+      const attempt = {
+        id: id(), owner_id: req.user.id, plan_code: d.plan,
+        idempotency_key: d.idempotency_key, method: d.method,
+        outcome: d.outcome, status: "processing", amount: PLANS.Advanced.price,
+        reference: "", created_at: at,
+        ready_at: new Date(Date.now() + 1500).toISOString(), completed_at: "",
+      };
+      await tx.run(
+        "INSERT INTO subscription_attempts (id,owner_id,plan_code,idempotency_key,method,outcome,status,amount,reference,created_at,ready_at,completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        Object.values(attempt),
+      );
+      await audit(tx, req.user.id, "plan.payment_started", attempt.id, `${d.plan} demo ${d.method} payment processing.`);
+      return attempt;
+    });
+    res.status(201).json({ attempt });
+  });
+  app.post("/api/subscription-attempts/:id/complete", auth("owner"), async (req, res) => {
+    if (!demo) fail(503, "Demo subscriptions are disabled");
+    const result = await db.transaction(async (tx) => {
+      const attempt = await tx.get("SELECT * FROM subscription_attempts WHERE id=?" + tx.lock, [req.params.id]);
+      if (!attempt || attempt.owner_id !== req.user.id) fail(404, "Subscription payment attempt not found");
+      if (attempt.status !== "processing") return { attempt };
+      if (Date.parse(attempt.ready_at) > Date.now()) return { attempt };
+      const status = attempt.outcome === "success" ? "paid" : "failed";
+      const completed = now();
+      let reference = "";
+      let payment = null;
+      if (status === "paid") {
+        reference = `PLAN-${id()}`;
+        const paymentId = id();
+        await tx.run("UPDATE users SET plan='Advanced' WHERE id=?", [req.user.id]);
+        await tx.run(
+          "INSERT INTO payments (id,booking_id,user_id,kind,amount,status,provider,reference,created_at,method,plan_code) VALUES (?,NULL,?,?,?,?,?,?,?,?,?)",
+          [paymentId, req.user.id, "subscription", attempt.amount, "paid", "demo", reference, completed, attempt.method, "Advanced"],
+        );
+        payment = { id: paymentId, reference, amount: attempt.amount, plan_code: "Advanced" };
+        await notify(tx, req.user.id, "Advanced plan activated", "Your Advanced demo plan is active. No real money was charged.");
+        await audit(tx, req.user.id, "plan.activated", req.user.id, `Advanced plan activated with ${attempt.method}; reference ${reference}.`);
+      } else {
+        await audit(tx, req.user.id, "plan.payment_failed", attempt.id, "Advanced plan payment declined by the demo simulator.");
+      }
+      await tx.run("UPDATE subscription_attempts SET status=?,reference=?,completed_at=? WHERE id=?", [status, reference, completed, attempt.id]);
+      return { attempt: { ...attempt, status, reference, completed_at: completed }, payment };
+    });
+    res.json(result);
+  });
   app.post("/api/owner/subscription", auth("owner"), async (req, res) => {
     if (!demo) fail(503, "Demo subscriptions are disabled");
-    const { plan } = z
-      .object({ plan: z.enum(["Basic", "Pro", "Advanced"]) })
-      .parse(req.body);
+    const { plan } = z.object({ plan: z.enum(PLAN_NAMES) }).strict().parse(req.body);
+    if (plan !== "Basic") fail(400, "Use the simulated checkout to activate Advanced");
     if (req.user.plan === plan) fail(409, "You are already on this plan");
     await db.transaction(async (tx) => {
-      await tx.run("UPDATE users SET plan=? WHERE id=?", [plan, req.user.id]);
+      await tx.run("UPDATE users SET plan='Basic' WHERE id=?", [req.user.id]);
       await tx.run(
-        "INSERT INTO payments (id,booking_id,user_id,kind,amount,status,provider,reference,created_at) VALUES (?,NULL,?,?,?,?,?,?,?)",
-        [
-          id(),
-          req.user.id,
-          "subscription",
-          { Basic: 0, Pro: 499, Advanced: 999 }[plan],
-          "paid",
-          "demo",
-          `PLAN-${id()}`,
-          now(),
-        ],
+        "UPDATE subscription_attempts SET status='cancelled',completed_at=? WHERE owner_id=? AND status='processing'",
+        [now(), req.user.id],
       );
-      await notify(
-        tx,
-        req.user.id,
-        "Plan updated",
-        `${plan} demo plan activated. No real money was charged.`,
-      );
+      await notify(tx, req.user.id, "Basic plan activated", "Your properties and bookings were preserved. Basic limits now apply to new additions.");
+      await audit(tx, req.user.id, "plan.downgraded", req.user.id, "Advanced to Basic; existing listings preserved.");
     });
     res.json({ ok: true });
+  });
+  app.get("/api/subscription-payments/:id/receipt", auth("owner", "admin"), async (req, res) => {
+    const payment = await db.get(
+      "SELECT p.*,u.name,u.email FROM payments p JOIN users u ON u.id=p.user_id WHERE p.id=? AND p.kind='subscription'",
+      [req.params.id],
+    );
+    if (!payment || (req.user.role !== "admin" && payment.user_id !== req.user.id))
+      fail(404, "Subscription receipt not found");
+    res.type("text/plain").attachment(`hostel-hub-plan-${payment.reference}.txt`).send([
+      "HOSTEL HUB — DEMO SUBSCRIPTION RECEIPT",
+      "No real money was transferred.", "",
+      `Reference: ${payment.reference}`, `Owner: ${payment.name}`,
+      `Email: ${payment.email}`, `Plan: ${payment.plan_code || "Advanced"}`,
+      `Method: ${payment.method.toUpperCase()}`, `Amount: INR ${payment.amount}`,
+      `Status: ${payment.status}`, `Date: ${payment.created_at}`,
+    ].join("\r\n"));
   });
 
   app.get("/api/notifications", auth(), async (req, res) =>
@@ -1332,8 +1428,22 @@ export function createApp(db, options = {}) {
       `SELECT COALESCE(SUM(p.amount-CASE WHEN p.status='refunded' THEN b.refund_amount ELSE 0 END),0) AS total FROM payments p JOIN bookings b ON b.id=p.booking_id JOIN hostels h ON h.id=b.hostel_id ${owner ? "WHERE h.owner_id=?" : ""}`,
       params,
     );
+    const planStats = owner
+      ? { basic_owners: 0, advanced_owners: 0, subscription_revenue: 0 }
+      : {
+          basic_owners: Number(
+            (await db.get("SELECT COUNT(*) c FROM users WHERE role='owner' AND plan='Basic'")).c,
+          ),
+          advanced_owners: Number(
+            (await db.get("SELECT COUNT(*) c FROM users WHERE role='owner' AND plan='Advanced'")).c,
+          ),
+          subscription_revenue: Number(
+            (await db.get("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE kind='subscription' AND status='paid'")).total,
+          ),
+        };
     res.json({
       stats: {
+        ...planStats,
         listings: hostels.length,
         bookings: bookings.length,
         booking_requests: bookings.filter(
@@ -1389,6 +1499,11 @@ export function createApp(db, options = {}) {
         ? []
         : await db.all(
             "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 100",
+          ),
+      subscription_attempts: owner
+        ? []
+        : await db.all(
+            "SELECT s.*,u.name AS owner_name,u.email AS owner_email FROM subscription_attempts s JOIN users u ON u.id=s.owner_id ORDER BY s.created_at DESC LIMIT 100",
           ),
     });
   });
@@ -1474,6 +1589,8 @@ export function createApp(db, options = {}) {
     "/api/reports/bookings.csv",
     auth("owner", "admin"),
     async (req, res) => {
+      if (req.user.role === "owner" && !planFor(req.user.plan).reportExports)
+        fail(403, "Booking exports are available on the Advanced plan");
       const rows = await db.all(
         `SELECT b.id,h.name,b.start_date,b.end_date,b.status,b.total,b.refund_amount FROM bookings b JOIN hostels h ON h.id=b.hostel_id ${req.user.role === "owner" ? "WHERE h.owner_id=?" : ""} ORDER BY b.created_at DESC`,
         req.user.role === "owner" ? [req.user.id] : [],
@@ -1588,7 +1705,7 @@ export function createApp(db, options = {}) {
   app.use("/api", (req, res) =>
     res.status(404).json({ error: "API route not found" }),
   );
-  const dist = resolve("dist");
+  const dist = join(projectRoot, "dist");
   if (existsSync(dist)) {
     app.use(express.static(dist));
     app.get("/{*path}", (req, res) => res.sendFile(join(dist, "index.html")));

@@ -158,6 +158,13 @@ Windows PowerShell:
 
     .\Start-HostelHub.ps1
 
+Windows double-click alternative:
+
+    Start-HostelHub.cmd
+
+The CMD launcher handles restrictive PowerShell script-execution policies and
+keeps the terminal open if startup fails so the error can be read.
+
 The launcher selects Node 24+, runs `npm ci` if node_modules is missing, builds
 the frontend if dist is missing, creates the SQLite schema, imports the demo CSV
 dataset and starts the server.
@@ -188,7 +195,8 @@ On the first non-production start, the application automatically creates:
 - the complete database schema and migrations
 - 10 independent owners
 - 60 guest accounts
-- 24 CSV properties plus room, booking, payment and history data
+- 44 CSV properties, 40 independent owners, 176 room types, 480 bookings,
+  realistic booking payments and representative Advanced-plan payments
 - sample private demo declaration files under uploads/private
 
 Startup is idempotent: restarting the server does not duplicate imported rows.

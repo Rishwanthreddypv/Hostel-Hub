@@ -22,6 +22,7 @@ export async function migrate(db, mysql) {
     payments: {
       method: "VARCHAR(20) NOT NULL DEFAULT 'demo'",
       refunded_at: "VARCHAR(30) NOT NULL DEFAULT ''",
+      plan_code: "VARCHAR(20) NOT NULL DEFAULT ''",
     },
   };
   for (const [table, columns] of Object.entries(additions)) {
@@ -42,4 +43,10 @@ export async function migrate(db, mysql) {
   await db.run(
     `CREATE TABLE IF NOT EXISTS seed_imports (id VARCHAR(36) PRIMARY KEY, source VARCHAR(255) NOT NULL, status VARCHAR(20) NOT NULL, summary TEXT NOT NULL, created_at VARCHAR(30) NOT NULL)`,
   );
+  await db.run(
+    `CREATE TABLE IF NOT EXISTS subscription_attempts (id VARCHAR(36) PRIMARY KEY, owner_id VARCHAR(36) NOT NULL, plan_code VARCHAR(20) NOT NULL, idempotency_key VARCHAR(100) NOT NULL UNIQUE, method VARCHAR(20) NOT NULL, outcome VARCHAR(20) NOT NULL, status VARCHAR(20) NOT NULL, amount INTEGER NOT NULL, reference VARCHAR(100) NOT NULL DEFAULT '', created_at VARCHAR(30) NOT NULL, ready_at VARCHAR(30) NOT NULL, completed_at VARCHAR(30) NOT NULL DEFAULT '', FOREIGN KEY(owner_id) REFERENCES users(id))`,
+  );
+  // Pro was an early demo tier. Advanced is now the single paid tier and keeps
+  // every former Pro owner's access without deleting listings or history.
+  await db.run("UPDATE users SET plan='Advanced' WHERE plan='Pro'");
 }

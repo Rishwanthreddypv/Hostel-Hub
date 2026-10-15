@@ -34,14 +34,19 @@ test("CSV round trips commas, Unicode, quotes and multiline text; malformed rows
 test("realistic CSV dataset reconciles and contains independent owner portfolios", () => {
   const { data } = loadSeedCSV();
   validateRelations(data);
-  assert.equal(data.owners.length, 10);
-  assert.equal(data.hostels.length, 24);
-  assert.equal(data.rooms.length, 96);
-  assert.equal(data.bookings.length, 240);
-  assert.equal(data.reviews.length, 100);
+  assert.equal(data.owners.length, 40);
+  assert.equal(data.hostels.length, 44);
+  assert.equal(data.rooms.length, 176);
+  assert.equal(data.bookings.length, 480);
+  assert.equal(data.reviews.length, 200);
+  assert.equal(data.subscription_payments.length, 12);
+  assert.deepEqual(
+    new Set(data.owners.map((owner) => owner.plan)),
+    new Set(["Basic", "Advanced"]),
+  );
   for (const owner of data.owners) {
     const count = data.hostels.filter((h) => h.owner_id === owner.id).length;
-    assert(count >= 1 && count <= 4);
+    assert(count >= 1 && count <= (owner.plan === "Advanced" ? 10 : 1));
   }
   const broken = structuredClone(data);
   broken.payments[0].amount++;
@@ -65,7 +70,12 @@ test("CSV import is repeatable, preserves live edits, reports row errors and rol
     assert(initial.inserted > 2900);
     assert.equal(initial.rejected, 0);
     const count = (await db.get("SELECT COUNT(*) AS n FROM bookings")).n;
-    assert.equal(count, 241);
+    assert.equal(count, 481);
+    assert.equal(
+      (await db.get("SELECT COUNT(*) AS n FROM payments WHERE kind='subscription'"))
+        .n,
+      12,
+    );
     const again = await importSeed(db, { directory, uploads: temp });
     assert.equal(again.inserted, 0);
     assert.equal(again.updated, 0);

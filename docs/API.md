@@ -35,7 +35,11 @@ Base: `/api`. JSON requests use `Content-Type: application/json` and `X-HostelHu
 | POST | `/owner/hostels/:id/documents` | Owner; private PDF/image upload |
 | GET | `/documents/:id` | Document owner or admin; private download |
 | POST | `/owner/hostels/:id/submit` | Owner; requires documents and photos |
-| POST | `/owner/subscription` | Owner; plan=Basic/Pro/Advanced, demo only |
+| GET | `/owner/subscription-attempts` | Owner; recent simulated Advanced checkout attempts |
+| POST | `/owner/subscription-attempts` | Owner; start Advanced checkout with method, outcome and idempotency key |
+| POST | `/subscription-attempts/:id/complete` | Owner; complete/retrieve the simulated checkout attempt |
+| POST | `/owner/subscription` | Owner; downgrade to Basic while preserving existing data |
+| GET | `/subscription-payments/:id/receipt` | Payment owner or admin; downloadable demo plan receipt |
 | GET | `/dashboard` | Owner-scoped or admin aggregates, payment activity and management data |
 | GET | `/notifications` | Own notifications |
 | POST | `/notifications/read` | Mark own notifications read |
@@ -47,7 +51,7 @@ Base: `/api`. JSON requests use `Content-Type: application/json` and `X-HostelHu
 | POST | `/admin/users/:id/status` | Admin; active/suspended; protects admin accounts |
 | POST | `/admin/reviews/:id` | Admin; published/hidden |
 | POST | `/admin/complaints/:id` | Admin; resolution, marks resolved and notifies |
-| GET | `/reports/bookings.csv` | Owner-scoped or admin CSV export |
+| GET | `/reports/bookings.csv` | Advanced-owner-scoped or admin CSV export |
 | POST | `/assistant` | Public; message; returns answer, hostel shortlist, mode |
 
 ## Booking decisions

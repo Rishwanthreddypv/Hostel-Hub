@@ -59,6 +59,23 @@ async function register(role = "user") {
   }).expect(201);
   return { a, user: r.body.user };
 }
+async function activateAdvanced(agent, outcome = "success") {
+  const started = await post(agent, "/owner/subscription-attempts", {
+    plan: "Advanced",
+    method: "upi",
+    outcome,
+    idempotency_key: randomUUID(),
+  }).expect(201);
+  await db.run("UPDATE subscription_attempts SET ready_at=? WHERE id=?", [
+    "2000-01-01T00:00:00.000Z",
+    started.body.attempt.id,
+  ]);
+  return post(
+    agent,
+    `/subscription-attempts/${started.body.attempt.id}/complete`,
+    {},
+  ).expect(200);
+}
 const dates = { start_date: "2027-01-01", end_date: "2027-01-31" };
 async function book(a, room = "hostel-1-room-3", range = dates) {
   return (await post(a, "/bookings", { room_id: room, ...range }).expect(201))
@@ -193,6 +210,7 @@ test("document verification cannot be bypassed, documents are private and upload
 test("owner can create/edit listing and room type, other owners cannot edit it", async () => {
   const owner = await login("owner"),
     { a: other } = await register("owner");
+  await activateAdvanced(owner);
   const h = (await owner.get("/api/hostels/hostel-1")).body.hostel;
   const data = {
     ...h,
@@ -219,13 +237,69 @@ test("owner can create/edit listing and room type, other owners cannot edit it",
     2,
   );
 });
+test("Basic and Advanced limits, offers and downgrade preservation stay consistent", async () => {
+  const { a: owner } = await register("owner");
+  const source = (await request(app).get("/api/hostels/hostel-1")).body.hostel;
+  const photo = () => `/uploads/${randomUUID()}.jpg`;
+  const listing = {
+    ...source,
+    name: "Plan limit home",
+    discount: 0,
+    photos: Array.from({ length: 8 }, photo),
+    rooms: [{ name: "Twin", sharing: 2, rent: 8000, capacity: 4, ac: true }],
+  };
+  await post(owner, "/owner/hostels", { ...listing, photos: [...listing.photos, photo()] }).expect(400);
+  await post(owner, "/owner/hostels", { ...listing, discount: 5 }).expect(403);
+  await post(owner, "/owner/hostels", listing).expect(201);
+  await post(owner, "/owner/hostels", { ...listing, name: "Second Basic home" }).expect(403);
+
+  await activateAdvanced(owner);
+  const advanced = await post(owner, "/owner/hostels", {
+    ...listing,
+    name: "Advanced home",
+    discount: 10,
+    photos: [...listing.photos, photo()],
+  }).expect(201);
+  await post(owner, "/owner/subscription", { plan: "Basic" }).expect(200);
+  const existing = {
+    ...listing,
+    name: "Advanced home preserved",
+    discount: 10,
+    photos: [...listing.photos, photo()],
+  };
+  await patch(owner, `/owner/hostels/${advanced.body.id}`, existing).expect(200);
+  await patch(owner, `/owner/hostels/${advanced.body.id}`, {
+    ...existing,
+    photos: [...existing.photos, photo()],
+  }).expect(400);
+  await patch(owner, `/owner/hostels/${advanced.body.id}`, {
+    ...existing,
+    discount: 11,
+  }).expect(403);
+  assert.equal(
+    (await owner.get("/api/owner/hostels")).body.hostels.length,
+    2,
+  );
+});
 test("subscriptions, complaints and CSV reports work across roles", async () => {
   const owner = await login("owner"),
     a = await login(),
     admin = await login("admin");
-  await post(owner, "/owner/subscription", { plan: "Pro" }).expect(200);
-  assert.equal((await owner.get("/api/auth/me")).body.user.plan, "Pro");
-  await post(owner, "/owner/subscription", { plan: "Pro" }).expect(409);
+  await activateAdvanced(owner, "failure");
+  assert.equal((await owner.get("/api/auth/me")).body.user.plan, "Basic");
+  const activated = await activateAdvanced(owner);
+  assert.equal((await owner.get("/api/auth/me")).body.user.plan, "Advanced");
+  assert.equal(activated.body.payment.plan_code, "Advanced");
+  await owner
+    .get(`/api/subscription-payments/${activated.body.payment.id}/receipt`)
+    .expect(200);
+  await post(owner, "/owner/subscription-attempts", {
+    plan: "Advanced",
+    method: "upi",
+    outcome: "success",
+    idempotency_key: randomUUID(),
+  }).expect(409);
+  await post(owner, "/owner/subscription", { plan: "Pro" }).expect(400);
   await post(a, "/complaints", {
     subject: "Need help",
     body: "Please explain the deposit.",
@@ -242,6 +316,9 @@ test("subscriptions, complaints and CSV reports work across roles", async () => 
   await a.get("/api/reports/bookings.csv").expect(403);
   const csv = await owner.get("/api/reports/bookings.csv").expect(200);
   assert(csv.text.includes("booking-demo"));
+  await post(owner, "/owner/subscription", { plan: "Basic" }).expect(200);
+  assert.equal((await owner.get("/api/auth/me")).body.user.plan, "Basic");
+  await owner.get("/api/reports/bookings.csv").expect(403);
 });
 test("suspension revokes existing sessions; password change and logout revoke tokens", async () => {
   const { a, user } = await register(),

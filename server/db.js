@@ -6,7 +6,10 @@ import mysql from "mysql2/promise";
 import { migrate } from "./migrations.js";
 
 export async function createDatabase(options = {}) {
-  const isMysql = (options.client || process.env.DB_CLIENT) === "mysql";
+  // An explicit file path always represents an isolated SQLite database. This
+  // keeps tests and one-off tools from inheriting DB_CLIENT=mysql from .env.
+  const client = options.client || (options.path ? "sqlite" : process.env.DB_CLIENT);
+  const isMysql = client === "mysql";
   let native;
   if (isMysql) native = mysql.createPool(process.env.DATABASE_URL);
   else {

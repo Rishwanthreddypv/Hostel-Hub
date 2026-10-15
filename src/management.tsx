@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Plus,
@@ -16,6 +16,11 @@ import {
   FileCheck,
   LifeBuoy,
   Bell,
+  Smartphone,
+  Landmark,
+  LoaderCircle,
+  ShieldCheck,
+  CheckCircle2,
 } from "lucide-react";
 import { api, money, dateLabel, type Hostel, type User } from "./api";
 import { Portfolio } from "./portfolio";
@@ -107,12 +112,14 @@ const defaultHostel = {
 };
 export function Owner() {
   const [property, setProperty] = useState("");
-  const { user, toast } = useApp();
+  const { user, toast, config } = useApp();
   const { data, error, load } = useLoad("/dashboard");
   const listings = useLoad("/owner/hostels");
   const [edit, setEdit] = useState<any>(null),
     [rooms, setRooms] = useState<Hostel | null>(null),
     [doc, setDoc] = useState<Hostel | null>(null);
+  const plan = config.plans?.find((p: any) => p.code === user?.plan);
+  const propertyCount = listings.data?.hostels.length || 0;
   const reload = async () => {
     await Promise.all([load(), listings.load()]);
   };
@@ -125,7 +132,13 @@ export function Owner() {
       >
         <button
           className="button"
+          disabled={!!plan && propertyCount >= plan.maxProperties}
           onClick={() => setEdit({ ...defaultHostel })}
+          title={
+            plan && propertyCount >= plan.maxProperties
+              ? `${plan.name} allows ${plan.maxProperties} properties`
+              : "Add a property"
+          }
         >
           <Plus size={17} />
           Add a property
@@ -149,11 +162,19 @@ export function Owner() {
           {user?.plan} plan
           <ArrowUpRight size={17} />
         </Link>
-        <a href="/api/reports/bookings.csv">
-          <Download size={19} />
-          Export bookings
-          <ArrowUpRight size={17} />
-        </a>
+        {plan?.reportExports ? (
+          <a href="/api/reports/bookings.csv">
+            <Download size={19} />
+            Export bookings
+            <ArrowUpRight size={17} />
+          </a>
+        ) : (
+          <Link to="/owner/plans">
+            <Download size={19} />
+            Advanced reports
+            <ArrowUpRight size={17} />
+          </Link>
+        )}
       </div>
       <div className="section-heading">
         <div>
@@ -321,10 +342,12 @@ function ListingEditor({
   onClose: () => void;
   onSave: () => Promise<void>;
 }) {
-  const { toast, config } = useApp();
+  const { toast, config, user } = useApp();
   const [h, setH] = useState({ ...initial }),
     [busy, setBusy] = useState(false),
     [uploading, setUploading] = useState(false);
+  const plan = config.plans?.find((p: any) => p.code === user?.plan);
+  const maxPhotos = plan?.maxPhotosPerProperty || 8;
   const change = (k: string, v: any) => setH((x: any) => ({ ...x, [k]: v }));
   const [firstRoom, setFirstRoom] = useState({
     name: "Twin room",
@@ -438,6 +461,7 @@ function ListingEditor({
                 min={min as number}
                 max={max as number}
                 value={h[k as string]}
+                disabled={k === "discount" && !plan?.specialOffers}
                 onChange={(e) => change(k as string, Number(e.target.value))}
               />
             </Field>
@@ -512,12 +536,15 @@ function ListingEditor({
             type="file"
             multiple
             accept=".jpg,.jpeg,.png,.webp"
-            disabled={uploading}
+            disabled={uploading || h.photos.length >= maxPhotos}
             onChange={async (e) => {
               setUploading(true);
               const photos = [...h.photos];
               try {
-                for (const f of Array.from(e.target.files || [])) {
+                for (const f of Array.from(e.target.files || []).slice(
+                  0,
+                  Math.max(0, maxPhotos - photos.length),
+                )) {
                   const fd = new FormData();
                   fd.append("file", f);
                   photos.push((await api("/uploads/photo", "POST", fd)).url);
@@ -532,6 +559,9 @@ function ListingEditor({
             }}
           />
         </Field>
+        <p className="muted">
+          {h.photos.length} of {maxPhotos} photos used on your {user?.plan} plan.
+        </p>
         {!h.id && (
           <>
             <h3>Your first room type</h3>
@@ -708,7 +738,7 @@ function PaymentTable({ payments }: { payments: any[] }) {
               <td>
                 <code>{p.reference.slice(0, 18)}</code>
               </td>
-              <td>{p.kind}</td>
+              <td>{p.kind === "subscription" ? `${p.plan_code || "Advanced"} plan` : p.kind}</td>
               <td>{money(p.amount)}</td>
               <td>
                 <Badge status={p.status}>{p.status}</Badge>
@@ -762,6 +792,11 @@ export function Admin() {
           <>
             <Portfolio property={property} onProperty={setProperty} />
             <WorkQueues stats={data.stats} />
+            <div className="stats-grid">
+              <div className="stat"><span>Basic owners</span><strong>{data.stats.basic_owners}</strong><small>Free plan</small></div>
+              <div className="stat"><span>Advanced owners</span><strong>{data.stats.advanced_owners}</strong><small>Priority plan</small></div>
+              <div className="stat"><span>Subscription revenue</span><strong>{money(data.stats.subscription_revenue)}</strong><small>Simulated successful payments</small></div>
+            </div>
             <div className="dashboard-shortcuts">
               <Link to="/bookings">
                 <CreditCard size={18} />
@@ -914,6 +949,22 @@ export function Admin() {
             {tab === "payments" && (
               <div className="panel">
                 <PaymentTable payments={data.payments} />
+                <h3>Recent subscription attempts</h3>
+                {data.subscription_attempts.length ? (
+                  <div className="table-wrap">
+                    <table>
+                      <thead><tr><th>Owner</th><th>Plan</th><th>Method</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+                      <tbody>{data.subscription_attempts.map((attempt: any) => (
+                        <tr key={attempt.id}>
+                          <td>{attempt.owner_name}<small>{attempt.owner_email}</small></td>
+                          <td>{attempt.plan_code}</td><td>{attempt.method.toUpperCase()}</td>
+                          <td>{money(attempt.amount)}</td><td><Badge status={attempt.status}>{attempt.status}</Badge></td>
+                          <td>{dateLabel(attempt.created_at)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                ) : <p className="muted">No interactive subscription attempts yet.</p>}
               </div>
             )}
             {tab === "audit" && (
@@ -1024,109 +1075,150 @@ export function Admin() {
     </div>
   );
 }
+function SubscriptionCheckout({ onClose }: { onClose: () => void }) {
+  const { refresh } = useApp();
+  const [method, setMethod] = useState("upi");
+  const [outcome, setOutcome] = useState("success");
+  const [consent, setConsent] = useState(false);
+  const [attempt, setAttempt] = useState<any>(null);
+  const [payment, setPayment] = useState<any>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [key, setKey] = useState(() => crypto.randomUUID());
+  useEffect(() => {
+    if (attempt?.status !== "processing") return;
+    const timer = setTimeout(async () => {
+      try {
+        const result = await api(
+          `/subscription-attempts/${attempt.id}/complete`,
+          "POST",
+          {},
+        );
+        setAttempt(result.attempt);
+        setPayment(result.payment);
+        if (result.attempt.status === "paid") await refresh();
+        if (result.attempt.status !== "processing") setKey(crypto.randomUUID());
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    }, 1600);
+    return () => clearTimeout(timer);
+  }, [attempt?.id, attempt?.status]);
+  const processing = attempt?.status === "processing";
+  const paid = attempt?.status === "paid";
+  async function begin() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api("/owner/subscription-attempts", "POST", {
+        plan: "Advanced",
+        method,
+        outcome,
+        idempotency_key: key,
+      });
+      setAttempt(result.attempt);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title={paid ? "Advanced is active" : "Activate Advanced"} onClose={processing ? () => {} : onClose}>
+      <div className="checkout-trust">
+        <ShieldCheck size={17} /> Demo subscription payment — no money transferred
+      </div>
+      {paid ? (
+        <div className="payment-result success">
+          <CheckCircle2 size={52} />
+          <h3>Your Advanced plan is active</h3>
+          <p>Priority discovery, expanded limits and advanced reports are ready.</p>
+          <strong>{money(999)}</strong>
+          {payment && <a className="button secondary" href={`/api/subscription-payments/${payment.id}/receipt`}><Download size={17} /> Download receipt</a>}
+          <button className="button" onClick={onClose}>Return to plans</button>
+        </div>
+      ) : processing ? (
+        <div className="payment-result" role="status">
+          <LoaderCircle size={44} className="spin" />
+          <h3>Confirming your demo payment</h3>
+          <p>Please keep this window open while the simulated bank responds.</p>
+        </div>
+      ) : (
+        <>
+          <div className="receipt-lines">
+            <div><span>Advanced plan</span><b>{money(999)}</b></div>
+            <div className="payment-grand-total"><span>Amount due now</span><strong>{money(999)}</strong></div>
+          </div>
+          <div className="payment-methods" aria-label="Subscription payment method">
+            {[["upi", "UPI", Smartphone], ["card", "Card", CreditCard], ["netbanking", "Net banking", Landmark]].map(([value, label, Icon]: any) => (
+              <button key={value} aria-pressed={method === value} className={method === value ? "selected" : ""} onClick={() => { setMethod(value); setKey(crypto.randomUUID()); }}><Icon size={20} /> {label}</button>
+            ))}
+          </div>
+          <Field label="Demo bank response">
+            <select value={outcome} onChange={(e) => { setOutcome(e.target.value); setKey(crypto.randomUUID()); }}>
+              <option value="success">Approve payment</option>
+              <option value="failure">Decline payment to test retry</option>
+            </select>
+          </Field>
+          {attempt?.status === "failed" && <div className="error-box">Payment declined. Your Basic plan is unchanged. You can retry.</div>}
+          <label className="payment-consent">
+            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+            <span>I understand this is a simulated ₹999 payment with no automatic renewal.</span>
+          </label>
+          <button className="button full" disabled={busy || !consent} onClick={begin}>{busy ? "Connecting…" : `Pay ${money(999)}`} <ShieldCheck size={18} /></button>
+          <ErrorBox error={error} />
+        </>
+      )}
+    </Modal>
+  );
+}
+
 export function Plans() {
   const { user, refresh, toast, config } = useApp();
-  const [plan, setPlan] = useState(""),
-    [busy, setBusy] = useState(false);
+  const listings = useLoad("/owner/hostels");
+  const [selected, setSelected] = useState("");
+  const [busy, setBusy] = useState(false);
+  const propertyCount = listings.data?.hostels.length || 0;
+  const photoCount = (listings.data?.hostels || []).reduce((total: number, hostel: any) => total + hostel.photos.length, 0);
+  const features: any = {
+    Basic: ["Manage 1 property", "Upload up to 8 photos per property", "Booking, room and availability management", "Messages, notifications and portfolio totals", "Standard search placement"],
+    Advanced: ["Manage up to 10 properties", "Upload up to 200 photos per property", "Priority placement in search results", "Property-level revenue and occupancy analytics", "Booking CSV reports, discounts and special offers"],
+  };
   return (
     <div className="page">
-      <PageTitle
-        eyebrow="ROOM TO GROW"
-        title="A plan for every host."
-        subtitle="Demo provider plans. All essential hosting tools stay available on every plan."
-      />
+      <PageTitle eyebrow="ROOM TO GROW" title="Two clear plans. One complete workflow." subtitle="Limits are enforced by the same rules used by search, reports and property management." />
+      <div className="info-box">Current usage: <b>{propertyCount} properties</b> and <b>{photoCount} photos</b>. Existing data is preserved if you move to Basic.</div>
+      <ErrorBox error={listings.error} />
       <div className="plans">
-        {[
-          [
-            "Basic",
-            0,
-            "A thoughtful start",
-            [
-              "Add and manage one PG property",
-              "Upload up to 5–8 photos",
-              "Display rent, deposit, amenities, food availability and room types",
-              "Show the PG on the map with its location",
-              "Receive tenant enquiries and booking requests",
-              "Basic listing views and enquiry statistics",
-              "Update availability and room vacancies",
-            ],
-          ],
-          [
-            "Pro",
-            499,
-            "Make yourself known",
-            [
-              "Everything in Basic",
-              "List up to 5–10 PG properties under one owner account",
-              "Upload more photos and videos, including room walkthroughs",
-              "Priority placement in search results",
-              "Featured listing badge on the home page or search page",
-              "Verified-owner badge after document verification",
-              "Advanced analytics: views, enquiries, conversion rate and popular locations",
-              "WhatsApp and email enquiry notifications",
-              "Lead management dashboard to track new, contacted and converted enquiries",
-              "Availability calendar and vacancy alerts",
-              "Promotional offers and discounts for tenants",
-            ],
-          ],
-        ].map(([name, price, tag, items]: any) => (
-          <article className={name === "Pro" ? "featured" : ""} key={name}>
-            {name === "Pro" && <Badge>POPULAR CHOICE</Badge>}
-            <h2>{name}</h2>
-            <p>{tag}</p>
-            <strong>
-              {money(price)}
-              <small> / month</small>
-            </strong>
-            <ul>
-              {items.map((item: string) => (
-                <li key={item}>
-                  <Check size={17} />
-                  {item}
-                </li>
-              ))}
-            </ul>
-            <button
-              className={"button full " + (name !== "Pro" ? "secondary" : "")}
-              disabled={user?.plan === name || !config.demo}
-              onClick={() => setPlan(name)}
-            >
-              {user?.plan === name ? "Your current plan" : "Choose " + name}
+        {(config.plans || []).map((plan: any) => (
+          <article className={plan.code === "Advanced" ? "featured" : ""} key={plan.code}>
+            {plan.code === "Advanced" && <Badge>PRIORITY PLAN</Badge>}
+            <h2>{plan.name}</h2><p>{plan.description}</p>
+            <strong>{money(plan.price)}<small> / month</small></strong>
+            <ul>{features[plan.code].map((item: string) => <li key={item}><Check size={17} />{item}</li>)}</ul>
+            <button className={`button full ${plan.code === "Basic" ? "secondary" : ""}`} disabled={user?.plan === plan.code || !config.demo} onClick={() => setSelected(plan.code)}>
+              {user?.plan === plan.code ? "Your current plan" : plan.code === "Advanced" ? "Upgrade to Advanced" : "Move to Basic"}
             </button>
-            <small>Simulated plan · no recurring charges</small>
+            <small>Simulated plan · no recurring charge</small>
           </article>
         ))}
       </div>
-      {plan && (
-        <Modal
-          title={"Activate " + plan + " demo plan?"}
-          onClose={() => setPlan("")}
-        >
-          <p>
-            This changes your provider badge and records a simulated plan
-            payment. There is no real charge or automatic renewal. Plans
-            demonstrate the subscription workflow; feature limits are not
-            enforced in this college edition.
-          </p>
-          <button
-            className="button"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await api("/owner/subscription", "POST", { plan });
-                await refresh();
-                setPlan("");
-                toast("Demo plan activated.");
-              } catch (e) {
-                toast((e as Error).message);
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            Confirm demo activation
-          </button>
+      {selected === "Advanced" && <SubscriptionCheckout onClose={() => setSelected("")} />}
+      {selected === "Basic" && (
+        <Modal title="Move to Basic?" onClose={() => setSelected("")}>
+          <p>Your properties and bookings remain intact. Basic limits apply to new properties, new photos, discounts and report exports.</p>
+          {propertyCount > 1 && <div className="info-box">Your {propertyCount} properties remain active, but you cannot add another property while Basic is active.</div>}
+          <button className="button" disabled={busy} onClick={async () => {
+            setBusy(true);
+            try {
+              await api("/owner/subscription", "POST", { plan: "Basic" });
+              await refresh();
+              await listings.load();
+              setSelected("");
+              toast("Basic plan activated. Existing data was preserved.");
+            } catch (e) { toast((e as Error).message); }
+            finally { setBusy(false); }
+          }}>{busy ? "Updating…" : "Confirm Basic plan"}</button>
         </Modal>
       )}
     </div>

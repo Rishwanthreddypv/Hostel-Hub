@@ -51,7 +51,7 @@ erDiagram
   USERS ||--o{ AUDIT_LOG : acts
 ```
 
-Owner accounts use the `users.role` discriminator instead of a duplicate credentials table. Facilities and ordered photo URLs are JSON strings in a hostel row. Subscription plan is the current value on an owner account, with subscription payments in the ledger. A production billing extension should add explicit subscription periods and provider event tables.
+Owner accounts use the `users.role` discriminator instead of a duplicate credentials table. Facilities and ordered photo URLs are JSON strings in a hostel row. `server/plans.js` is the authority for Basic and Advanced prices, quotas and entitlements. The current plan remains on the owner account; `subscription_attempts` records simulated processing/failure and successful payments are written to the common ledger with a plan code. A production billing extension should add explicit subscription periods and provider webhook events.
 
 ## Booking states
 

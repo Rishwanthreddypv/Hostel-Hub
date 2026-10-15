@@ -13,6 +13,10 @@ cd C:\FSD\hostel-hub
 .\Start-HostelHub.ps1
 ```
 
+On Windows, you can also double-click `Start-HostelHub.cmd`. This launcher works
+when PowerShell's script execution policy blocks direct `.ps1` execution and
+keeps the window open when startup fails.
+
 Open **http://localhost:4000**. Keep the terminal running; Ctrl+C stops the server. If a server is already running on port 4000, open that URL instead of launching another instance.
 
 For development with hot reload:
@@ -43,7 +47,7 @@ The first local start creates the schema and demo dataset automatically. No data
 
 The sign-in page has Guest, Owner and Admin shortcuts and an independent-account selector. Each owner has a separate login and owns several properties; other owners cannot access their bookings, payments or documents. You can register additional guests and owners. Public admin registration is unavailable. Existing demo accounts still work.
 
-The editable dataset contains **10 owners, 60 guests, 24 properties across 5 cities, 96 room types and 240 bookings**, with related payment attempts, reviews, messages and history. All people and businesses are fictional. See the [CSV data guide](docs/CSV-DATA-GUIDE.md) for every file, account, validation rule and safe import command. Existing databases retain their earlier records alongside this dataset.
+The editable dataset contains **40 owners, 60 guests, 44 properties across several Indian cities, 176 room types and 480 bookings**, with related payment attempts, subscription payments, reviews, messages and history. All people and businesses are fictional. See the [CSV data guide](docs/CSV-DATA-GUIDE.md) for every file, account, validation rule and safe import command. Existing databases retain their earlier records alongside this dataset.
 
 ## Included workflows
 
@@ -58,7 +62,7 @@ The editable dataset contains **10 owners, 60 guests, 24 properties across 5 cit
 - Owner property editor, image uploads, room pricing/capacity, document upload, submission for admin verification, booking decisions, payment activity and CSV export.
 - Admin verification, publication/rejection, member suspension, review moderation, complaint resolution, refund processing, analytics, payment history and audit history.
 - In-app guest/owner messages, notifications refreshed every 20 seconds, support requests and a database-backed local search assistant.
-- Basic/Pro/Advanced demo plans, persisted provider badges and a simulated subscription payment ledger.
+- Basic and Advanced plans with enforced property/photo limits, priority discovery, simulated upgrade checkout, downgrade preservation, receipts and an admin-visible subscription ledger.
 
 ## Try a complete booking
 
@@ -112,7 +116,7 @@ The adapter follows the [official Chat Completions API request/response contract
 | Capability | Delivered behavior |
 | --- | --- |
 | Payments/refunds | Working demo ledger and booking transitions. No Razorpay money movement. |
-| Provider plans | Demo activation and payment records; no auto-renewal or premium feature enforcement. All core tools remain available. |
+| Provider plans | Basic is free with one property and eight photos. Advanced is a simulated ₹999 payment with ten properties, 200 photos, priority discovery, detailed analytics, booking exports and offers. No automatic renewal. |
 | AI assistant | Working local inventory search; optional generative adapter needs credentials and provider testing. |
 | Maps | OpenStreetMap tiles need internet. Google Maps opens an external location link; no paid Maps API key needed. |
 | Notifications/messages | Stored in-app and polled periodically; SMTP email and SMS delivery are not connected. |

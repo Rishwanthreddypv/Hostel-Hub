@@ -1,0 +1,784 @@
+HOSTEL HUB — WORK AND PRESENTATION SPLIT FOR 3 MEMBERS
+=====================================================
+
+Purpose
+-------
+This split gives every member a meaningful frontend, backend, database, testing,
+and live-demonstration contribution. Replace “Member 1/2/3” with your names.
+
+Suggested total presentation time: 15–18 minutes
+Each member: approximately 5–6 minutes
+
+
+MEMBER 1 — USER EXPERIENCE, AUTHENTICATION AND HOSTEL DISCOVERY
+===============================================================
+
+Main responsibility:
+Build and explain the public-facing experience and the user account flow.
+
+Frontend contribution:
+- Application routing, navigation, role guards and shared components.
+- Registration and login for residents and hostel owners.
+- User profile and password-management screens.
+- Hostel home page, listing cards and detailed hostel page.
+- Search by city, area, hostel and nearby institution.
+- Filters for budget, gender, room sharing, AC, food, Wi-Fi, rating,
+  availability and distance.
+- Sorting, map/list view, Google Maps links and photo/facility display.
+- Wishlist, hostel comparison and the local hostel-search assistant UI.
+- Responsive public pages and reusable loading, error and empty states.
+
+Primary frontend files:
+- src/main.tsx
+- src/homes.tsx
+- src/account.tsx
+- src/shared.tsx
+- Relevant public-page sections in src/styles.css
+
+Backend contribution:
+- Registration, login, logout and session authentication.
+- Password hashing, JWT cookies and role-based authorization.
+- Profile update and password-change APIs.
+- Public hostel search, filtering, sorting and listing-detail APIs.
+- Wishlist, comparison data, user messages and local assistant APIs.
+- Input validation, protected routes, CSRF checks and request limits.
+
+Primary backend areas:
+- Authentication, public listing, profile, wishlist, message and assistant
+  routes in server/app.js
+- Shared database access through server/db.js
+
+Database contribution:
+- users
+- hostels (public discovery fields)
+- wishlist
+- messages
+- notifications used by user-facing flows
+
+Testing contribution:
+- Login and registration validation.
+- Duplicate email, incorrect password and role-access tests.
+- Search/filter/sort tests.
+- Wishlist isolation and comparison-limit tests.
+- Responsive public-page and protected-route tests.
+
+Suggested speaking points:
+1. “Hostel Hub supports three independent roles: resident, owner and admin.”
+2. Explain how authentication restores a secure server session and how route
+   guards prevent one role from entering another role’s workspace.
+3. Show that discovery data comes from MySQL, including room prices,
+   facilities, availability, ratings and coordinates.
+4. Explain that filters are applied by backend queries, so users cannot bypass
+   them by changing the frontend.
+5. Demonstrate login, search, filters, map view, details and wishlist.
+
+Live demo segment:
+1. Open the home page.
+2. Search for a city and apply two or three filters.
+3. Open a hostel, view its rooms/facilities/map and save it.
+4. Sign in as a resident and open the wishlist/profile.
+
+Handoff line:
+“After a resident finds a suitable hostel, the next module takes the request
+through approval, payment and booking completion.”
+
+
+MEMBER 2 — BOOKING LIFECYCLE, PAYMENTS AND RESIDENT–OWNER OPERATIONS
+===================================================================
+
+Main responsibility:
+Build and explain the complete booking state machine and simulated financial
+workflow shared by residents and owners.
+
+Frontend contribution:
+- Booking request form with room, date and bed-quantity selection.
+- Resident, owner and admin booking workspaces.
+- Booking status, attention queues, search, sorting and property filters.
+- Owner approval/rejection dialogs and required rejection reasons.
+- Payment checkout for UPI, card and net banking.
+- Simulated payment decline, retry, processing and success screens.
+- Downloadable receipts and payment ledgers.
+- Booking timeline, cancellation quote and refund status.
+- Portfolio totals for collections, refunds, occupancy and residents.
+
+Primary frontend files:
+- src/bookings.tsx
+- src/checkout.tsx
+- src/portfolio.tsx
+- Booking/payment sections in src/styles.css
+
+Backend contribution:
+- Server-calculated rent, deposit, food charge, service charge and total.
+- Minimum-stay, sharing, quantity and date validation.
+- Quantity-weighted availability and overlap checks.
+- Transactional capacity protection to prevent overselling.
+- Booking state transitions: pending owner, awaiting payment, confirmed,
+  rejected, cancelled, refund pending and refunded.
+- Owner approval/rejection permissions and payment-window expiry.
+- Payment attempts, idempotency, failure/retry and final payment creation.
+- Receipt generation, cancellation quote and admin refund processing.
+- Booking history events and owner/admin portfolio calculations.
+
+Primary backend files:
+- server/booking-workflow.js
+- server/payments.js
+- server/portfolio.js
+- Booking, cancellation and refund routes in server/app.js
+
+Database contribution:
+- bookings
+- booking_events
+- payment_attempts
+- payments for booking charges and refunds
+- reviews linked to completed bookings
+
+Testing contribution:
+- Complete booking → owner approval → payment workflow.
+- Failed payment followed by successful retry.
+- Duplicate-payment and idempotency protection.
+- Concurrent requests and room-capacity protection.
+- Cross-owner and cross-user privacy tests.
+- Cancellation, refund and downloadable receipt tests.
+
+Suggested speaking points:
+1. Explain why pricing is calculated again on the server instead of trusting
+   values sent by the browser.
+2. Describe the booking state machine and why payment becomes available only
+   after owner approval.
+3. Explain the transaction used to stop two users from reserving the same last
+   bed at the same time.
+4. Clarify that the payment experience is realistic but transfers no money.
+5. Show how every action is recorded in the private booking timeline.
+
+Live demo segment:
+1. Request a hostel as the resident.
+2. Sign in as that hostel’s owner and approve the request.
+3. Return as the resident, decline one demo payment and retry successfully.
+4. Download the receipt and open the booking history.
+5. Cancel the booking and show the refund amount/status.
+
+Handoff line:
+“The booking workflow depends on owners maintaining verified properties and on
+admins controlling trust, plans and refunds, which is covered in the final
+module.”
+
+
+MEMBER 3 — OWNER MANAGEMENT, ADMIN CONTROL, PLANS AND DATA ENGINEERING
+=====================================================================
+
+Main responsibility:
+Build and explain owner portfolios, listing verification, administration,
+subscription plans and the MySQL/CSV data pipeline.
+
+Frontend contribution:
+- Owner dashboard, work queues and independent multi-property portfolios.
+- Property editor, room management, pricing, facilities and photo uploads.
+- Private ownership-document upload and listing submission.
+- Admin dashboard for listing approval/rejection and document review.
+- User suspension/reactivation, review moderation and complaint handling.
+- Payment/refund oversight, audit history and CSV-import history.
+- Basic and Advanced plan cards and entitlement display.
+- Advanced checkout, failed-payment retry, receipt and Basic downgrade dialog.
+- Advanced-only analytics/export controls and Basic quota messages.
+
+Primary frontend files:
+- src/management.tsx
+- Owner/admin payment and analytics integration in src/portfolio.tsx
+- Owner/admin/plan sections in src/styles.css
+
+Backend contribution:
+- Owner-scoped property and room CRUD APIs.
+- Photo/document validation and private document authorization.
+- Listing submission, verification, publication and re-review workflow.
+- Admin user, review, complaint, refund and audit APIs.
+- Shared Basic/Advanced plan catalogue and enforced entitlements.
+- Advanced subscription attempt, completion and receipt APIs.
+- Search-priority rules and downgrade data preservation.
+- Dashboard statistics, Advanced reports and admin subscription monitoring.
+- MySQL connection adapter, schema, migrations and foreign keys.
+- Transactional/idempotent CSV import with live-edit preservation.
+
+Primary backend and data files:
+- server/plans.js
+- Owner, plan and admin routes in server/app.js
+- server/db.js
+- server/migrations.js
+- server/seed-import.js
+- server/csv.js
+- seed-data/*.csv and seed-data/manifest.json
+
+Database contribution:
+- rooms
+- documents
+- facilities stored with listings
+- complaints
+- audit_log
+- subscription_attempts
+- subscription payment rows and plan_code in payments
+- seed_records and seed_imports
+
+Testing contribution:
+- Independent-owner authorization tests.
+- Property/photo quota and discount entitlement tests.
+- Advanced upgrade, failure/retry, receipt and Basic downgrade tests.
+- Listing verification and private-document tests.
+- CSV validation, repeat import and live-edit preservation tests.
+- MySQL foreign-key, orphan-record and financial-integrity audits.
+
+Suggested speaking points:
+1. Explain that every owner has a separate login and can manage only their own
+   properties, rooms, bookings, payments and documents.
+2. Demonstrate the verification flow: owner submits documents, admin reviews
+   them, and only approved properties appear publicly.
+3. Compare the two plans:
+   - Basic: 1 property, 8 photos and core management.
+   - Advanced: ₹999 simulated payment, 10 properties, 200 photos, priority
+     discovery, detailed analytics, report exports and offers.
+4. Explain that downgrading never deletes existing owner data; it restricts
+   future additions that exceed Basic limits.
+5. Describe CSV as editable seed input and MySQL as the live runtime source of
+   truth. Registrations, bookings, payments and updates are stored in MySQL.
+
+Live demo segment:
+1. Open an owner dashboard and show separate properties and room inventory.
+2. Open the plans page and explain Basic versus Advanced.
+3. Show the admin verification workspace and subscription/payment statistics.
+4. Process the resident’s pending demo refund from Member 2’s segment.
+5. Show the MySQL-backed admin analytics or CSV import history.
+
+
+DETAILED FILE-BY-FILE CODE WALKTHROUGH
+======================================
+
+The following is the exact file-opening order for the code explanation. Each
+member should bookmark these files in VS Code before presenting. Do not read
+every line. Open the named component, function, route or table and explain its
+input, validation, database work and result.
+
+
+MEMBER 1 — FILES TO OPEN AND EXPLAIN
+------------------------------------
+
+1. src/main.tsx
+   Show:
+   - App component and Ctx.Provider.
+   - Route definitions for public pages, login, profile and protected pages.
+   - Header component and role-specific navigation.
+   - Assistant component.
+   Explain:
+   - The application loads the current session and public configuration first.
+   - React Router selects the page without duplicating layout code.
+   - The same navigation changes according to resident, owner or admin role.
+
+2. src/api.ts
+   Show:
+   - User and Hostel TypeScript types.
+   - api() wrapper.
+   - money(), dateLabel() and nextDate() helpers.
+   Explain:
+   - All frontend requests use one wrapper for JSON, errors and the required
+     X-HostelHub-Client request header.
+   - Shared types keep the components consistent with API responses.
+
+3. src/shared.tsx
+   Show:
+   - Ctx and useApp().
+   - Modal, Field, useLoad, ErrorBox, Guard and PageTitle.
+   Explain:
+   - Shared accessible components reduce repeated frontend code.
+   - Guard checks the restored role before rendering a protected page.
+   - Backend authorization is still the final security control.
+
+4. src/account.tsx
+   Show:
+   - Auth component for login and registration.
+   - Profile component.
+   - Notifications, Messages and Support components.
+   Explain:
+   - Public registration accepts resident or owner but never admin.
+   - Profile/password forms send validated requests to the backend.
+   - Messages, notifications and complaints are loaded for the signed-in user.
+
+5. src/homes.tsx
+   Show:
+   - HostelCard.
+   - Explore.
+   - MapView.
+   - Details.
+   - Compare.
+   Explain:
+   - Explore builds the search/filter query and renders database results.
+   - Details combines hostel, room, rating and availability information.
+   - MapView uses stored coordinates; Compare limits selection to three homes.
+
+6. src/styles.css
+   Show:
+   - Header/navigation and responsive media-query sections.
+   - Search/filter, hostel-card, detail, map and authentication styles.
+   Explain:
+   - One responsive design system is shared by desktop and mobile pages.
+   - Focus, status, loading and modal states support usability and accessibility.
+
+7. server/app.js — authentication and public/user routes
+   Show these route blocks:
+   - GET /api/config
+   - GET /api/auth/me
+   - POST /api/auth/register
+   - POST /api/auth/login
+   - POST /api/auth/logout
+   - PATCH /api/profile
+   - POST /api/profile/password
+   - GET /api/hostels
+   - GET /api/hostels/:id
+   - GET/POST /api/wishlist
+   - GET/POST /api/notifications
+   - GET/POST /api/messages
+   - GET/POST /api/complaints
+   - POST /api/assistant
+   Also show:
+   - Zod validation schemas near the top.
+   - publicUser(), auth(), cookie(), notify() and audit() helpers.
+   Explain:
+   - Passwords are hashed, sessions use HTTP-only JWT cookies and every private
+     route checks the database user and role.
+   - Search parameters are validated and applied in SQL, with unpublished
+     properties excluded from public results.
+   - Wishlist/messages are scoped by req.user.id.
+
+8. tests/workflows.test.js
+   Show these tests:
+   - Public search and filters.
+   - Authentication and role enforcement.
+   - CSRF protection.
+   - Wishlist and message isolation.
+   - Assistant inventory response.
+   Explain:
+   - The tests call the real Express API against an isolated database.
+   - They check both successful use and unauthorized/invalid requests.
+
+9. scripts/mysql-ui-surface-audit.mjs
+   Show:
+   - login() and crawl().
+   - Public map/compare checks.
+   - Guest, owner and admin route arrays.
+   Explain:
+   - Playwright opens the built application in Edge and verifies that every
+     role’s frontend routes render without JavaScript errors or HTTP 5xx errors.
+
+10. Documentation to keep open if questioned
+    - docs/REQUIREMENTS.md for implemented user/search requirements.
+    - docs/API.md for request/response descriptions.
+    - docs/ARCHITECTURE.md for the React → Express → MySQL diagram.
+
+
+MEMBER 2 — FILES TO OPEN AND EXPLAIN
+------------------------------------
+
+1. src/bookings.tsx
+   Show:
+   - eventLabels, actionLabels and statusNames.
+   - Bookings component.
+   - Role-specific filters, action buttons and timeline dialog.
+   - Cancellation/refund confirmation UI.
+   Explain:
+   - One workspace adapts to resident, owner and admin permissions.
+   - Booking statuses drive the available actions.
+   - Lists refresh while visible so decisions and payments appear quickly.
+
+2. src/checkout.tsx
+   Show:
+   - PaymentBreakdown.
+   - Checkout component.
+   - Payment method controls, demo outcome, processing and receipt state.
+   Explain:
+   - The displayed quote comes from the backend booking record.
+   - A failed attempt can be retried with a new idempotency key.
+   - The UI clearly states that no real money is transferred.
+
+3. src/portfolio.tsx
+   Show:
+   - Portfolio component.
+   - Property filter and owner/admin metric cards.
+   - Payments component and receipt links.
+   Explain:
+   - Owners see only their properties and financial totals.
+   - Admin can inspect the wider platform portfolio.
+   - Basic receives core totals; property-level analytics require Advanced.
+
+4. server/booking-workflow.js
+   Show:
+   - bookingStatus().
+   - cancellationQuote().
+   - bookingPermissions().
+   - recordBookingEvent().
+   - bookingRows().
+   Explain:
+   - Central status and permission functions keep API responses consistent.
+   - Cancellation amounts are calculated from booking dates and status.
+   - Timeline events record who performed each change.
+
+5. server/payments.js
+   Show these routes/functions:
+   - installPayments().
+   - POST /api/bookings/:id/payment-attempts.
+   - POST /api/payment-attempts/:id/complete.
+   - GET /api/payments.
+   - GET /api/bookings/:id/receipt.
+   Explain:
+   - Payment attempts have processing, failed and paid states.
+   - Idempotency prevents a retry from creating two successful payments.
+   - Only authorized booking participants/admin can access payment data.
+
+6. server/portfolio.js
+   Show:
+   - installPortfolio().
+   - GET /api/portfolio.
+   - Property ownership conditions and Advanced analytics branch.
+   Explain:
+   - Totals are calculated from MySQL bookings and payments.
+   - Owner filtering is enforced in SQL rather than only in the interface.
+
+7. server/app.js — booking/review/refund routes
+   Show these route blocks and helpers:
+   - occupied() capacity calculation.
+   - POST /api/bookings.
+   - GET /api/bookings and GET /api/bookings/:id.
+   - POST /api/bookings/:id/pay.
+   - POST /api/bookings/:id/action.
+   - POST /api/reviews.
+   - Admin booking CSV report route.
+   Explain:
+   - Dates, minimum stay, room sharing and quantity are checked server-side.
+   - MySQL transactions lock inventory before confirming capacity.
+   - Owner approval opens the payment window; cancellation/refund transitions
+     are checked again inside a transaction.
+
+8. server/db.js — booking/payment table definitions
+   Show the definitions for:
+   - bookings
+   - payments
+   - reviews
+   - booking_events
+   Explain:
+   - Foreign keys connect users, hostels, rooms and bookings.
+   - Monetary values are stored as integer rupees for this local project.
+
+9. server/migrations.js — payment workflow additions
+   Show:
+   - Added booking price/quantity/status columns.
+   - payment_attempts table.
+   - Relevant indexes and constraints.
+   Explain:
+   - Migrations add new fields without destroying existing local data.
+
+10. tests/booking-v2.test.js
+    Show these tests:
+    - Server-calculated quote and approval requirement.
+    - Payment processing, retry and replay protection.
+    - Concurrent multi-bed capacity protection.
+    - Foreign owner/user privacy.
+    - Cancellation during processing.
+    - Refund and completed-stay review behavior.
+    Explain:
+    - These tests cover the highest-risk state and concurrency rules.
+
+11. scripts/mysql-browser-audit.mjs
+    Show:
+    - Resident booking creation.
+    - Owner approval.
+    - Failed and successful checkout.
+    - Receipt, cancellation and admin refund checks.
+    Explain:
+    - This is the real browser-to-Express-to-MySQL end-to-end proof.
+
+12. Documentation to keep open if questioned
+    - docs/API.md for booking/payment endpoints.
+    - docs/FULL-QA-AUDIT-2026-10-14.md for final pass counts.
+    - docs/ARCHITECTURE.md for booking relationships and flow.
+
+
+MEMBER 3 — FILES TO OPEN AND EXPLAIN
+------------------------------------
+
+1. src/management.tsx
+   Show:
+   - WorkQueues and Stats.
+   - Owner component.
+   - ListingEditor and RoomEditor.
+   - PaymentTable.
+   - Admin component.
+   - SubscriptionCheckout.
+   - Plans component.
+   Explain:
+   - The owner dashboard separates portfolios by the authenticated owner.
+   - Editors enforce plan-aware property/photo/discount controls in the UI.
+   - Admin handles verification, users, reviews, subscriptions and audit data.
+   - Subscription checkout supports decline, retry, success, receipt and
+     downgrade while clearly remaining a simulation.
+
+2. src/portfolio.tsx
+   Show:
+   - The Advanced analytics table.
+   - Basic upgrade message.
+   - Subscription rows and receipt links in Payments.
+   Explain:
+   - The frontend renders only the analytics allowed by the backend response.
+
+3. server/plans.js
+   Show:
+   - PLANS.Basic and PLANS.Advanced.
+   - PLAN_NAMES, planFor() and publicPlans().
+   Explain:
+   - One plan catalogue supplies quotas, prices, priority and feature flags to
+     the API, seeding rules and frontend configuration.
+
+4. server/app.js — owner, subscription and admin routes
+   Show these route blocks:
+   - GET/POST/PATCH /api/owner/hostels.
+   - POST/PATCH room routes.
+   - Photo and document upload routes.
+   - GET /api/documents/:id.
+   - POST /api/owner/hostels/:id/submit.
+   - GET/POST /api/owner/subscription-attempts.
+   - POST /api/subscription-attempts/:id/complete.
+   - POST /api/owner/subscription for Basic downgrade.
+   - GET /api/subscription-payments/:id/receipt.
+   - GET /api/dashboard.
+   - Admin listing review, user status, review moderation and complaint routes.
+   Explain:
+   - Every owner query includes the owner ID, preventing cross-owner access.
+   - Private documents are never exposed through the public uploads directory.
+   - Property and photo limits come from planFor(), including preservation of
+     existing data after downgrade.
+   - Admin actions create notifications and audit records.
+
+5. server/db.js
+   Show:
+   - createDatabase().
+   - MySQL pool selection from DATABASE_URL.
+   - all(), get(), run() and transaction() adapter methods.
+   - Table creation loop and foreign-key definitions.
+   Explain:
+   - The same API code can use MySQL in the configured application and isolated
+     SQLite files in automated tests.
+   - MySQL transactions commit or roll back as one unit.
+
+6. server/migrations.js
+   Show:
+   - Additive migration helper.
+   - payment_attempts, seed_records, seed_imports and subscription_attempts.
+   - plan_code added to payments.
+   - Legacy paid-plan migration to Advanced.
+   Explain:
+   - Existing installations are upgraded without dropping their data.
+
+7. server/csv.js
+   Show:
+   - parseCSV().
+   - stringifyCSV().
+   Explain:
+   - The parser correctly handles commas, quotes, Unicode and multiline data.
+
+8. server/seed-import.js
+   Show:
+   - columns and enum definitions.
+   - loadSeedCSV().
+   - validateRelations().
+   - importSeed().
+   - Basic/Advanced consistency checks.
+   Explain:
+   - CSV files are editable input, while MySQL is the runtime source of truth.
+   - Import is transactional and repeatable.
+   - Source hashes prevent seed refreshes from overwriting live user changes.
+
+9. server/seed.js
+   Show:
+   - seed().
+   Explain:
+   - Bootstrap accounts and CSV import run only when appropriate.
+
+10. server/index.js
+    Show:
+    - Database creation, seed call, Express creation and listen call.
+    Explain:
+    - This is the backend entry point used by npm start.
+
+11. server/create-admin.js
+    Show:
+    - ADMIN_EMAIL/ADMIN_PASSWORD validation and controlled admin creation.
+    Explain:
+    - Public registration cannot create an admin; administration is bootstrapped
+      from private environment values.
+
+12. seed-data files
+    Open these representative files on screen:
+    - owners.csv: independent owner accounts and Basic/Advanced values.
+    - guests.csv: realistic resident accounts.
+    - hostels.csv: owner-to-property relationship and listing information.
+    - rooms.csv: sharing, rent, capacity and AC inventory.
+    - subscription_payments.csv: realistic ₹999 Advanced ledger entries.
+    - manifest.json: expected record counts.
+    Mention the related files:
+    - hostel_photos.csv, hostel_amenities.csv and documents.csv.
+    - bookings.csv, booking_events.csv, payment_attempts.csv and payments.csv.
+    - reviews.csv, wishlist.csv, messages.csv and notifications.csv.
+    - complaints.csv and audit_log.csv.
+    Explain:
+    - The complete seed contains 40 owners, 60 residents, 44 properties, 176
+      room types and 480 bookings with consistent relationships.
+
+13. scripts/build-seed-csv.mjs and scripts/seed-cli.mjs
+    Show:
+    - Dataset generation and validation entry points.
+    Explain:
+    - One script regenerates consistent realistic CSVs and the other validates
+      or imports them through the same server rules.
+
+14. tests/seed-import.test.js
+    Show:
+    - CSV parsing test.
+    - Dataset relationship/plan consistency test.
+    - Repeat import, live-edit preservation and rollback test.
+    Explain:
+    - Invalid or conflicting seed data cannot partially corrupt the database.
+
+15. tests/workflows.test.js
+    Show these tests:
+    - Document verification and private access.
+    - Independent owner property/room management.
+    - Basic/Advanced limits and downgrade preservation.
+    - Subscription, complaint and CSV report roles.
+    - Suspension/session revocation.
+
+16. MySQL verification scripts
+    - scripts/mysql-api-audit.mjs: API workflows against live MySQL.
+    - scripts/mysql-integrity-audit.mjs: orphan, amount, status, engine and
+      foreign-key checks.
+    - scripts/mysql-browser-audit.mjs: full role and plan browser journey.
+    - scripts/mysql-ui-surface-audit.mjs: all role routes and UI errors.
+    - scripts/cleanup-mysql-audit.mjs: removes only generated QA accounts/data.
+    Explain:
+    - Final results were 147 API checks, 38 browser-journey checks, 31 UI route
+      checks and 26 database-integrity checks, all passing.
+
+17. Configuration and deployment files
+    - package.json: dependencies and npm build/test/seed/start commands.
+    - .env.example: safe configuration names without private credentials.
+    - vite.config.ts: frontend build and development proxy.
+    - tsconfig.json: TypeScript compiler rules.
+    - Dockerfile and compose.yaml: container/deployment starting point.
+    - Start-HostelHub.ps1 and Start-HostelHub.cmd: Windows launchers.
+    Explain:
+    - Actual passwords remain in the ignored .env file and must never be shown.
+
+18. Documentation to keep open if questioned
+    - README.md for features, accounts and run commands.
+    - FRIEND_SETUP_GUIDE.txt for cloning and complete local setup.
+    - docs/CSV-DATA-GUIDE.md for every CSV and import procedure.
+    - docs/ARCHITECTURE.md for system design and data relationships.
+    - docs/API.md for endpoints.
+    - docs/REQUIREMENTS.md for feature traceability.
+    - docs/FULL-QA-AUDIT-2026-10-14.md for final verification evidence.
+
+
+FILES THAT SHOULD NOT BE SHOWN DURING THE PRESENTATION
+======================================================
+
+- .env — contains private database credentials and JWT configuration.
+- uploads/private/* — represents private ownership documents.
+- node_modules/* — installed third-party packages, not project source code.
+- dist/* — generated production output; show source files instead.
+- package-lock.json — useful for reproducible installation but too large for a
+  code walkthrough. Mention it only if asked about dependency locking.
+
+
+FAST CODE-DEMO ORDER IF TIME IS LIMITED
+=======================================
+
+If the evaluator allows only a short code walkthrough, open these files:
+
+Member 1:
+1. src/main.tsx
+2. src/homes.tsx
+3. src/account.tsx
+4. server/app.js at authentication and GET /api/hostels
+5. tests/workflows.test.js
+
+Member 2:
+1. src/bookings.tsx
+2. src/checkout.tsx
+3. server/booking-workflow.js
+4. server/payments.js
+5. tests/booking-v2.test.js
+
+Member 3:
+1. src/management.tsx
+2. server/plans.js
+3. server/app.js at owner/subscription/admin routes
+4. server/db.js and server/seed-import.js
+5. seed-data/manifest.json and scripts/mysql-integrity-audit.mjs
+
+
+SHARED OPENING — 45 TO 60 SECONDS
+=================================
+
+Any one member can say:
+
+“Hostel Hub is a full-stack hostel discovery and booking platform built for
+residents, hostel owners and administrators. Residents can discover verified
+hostels and complete a controlled booking flow. Owners receive independent
+accounts for managing multiple properties, rooms, availability and requests.
+Admins verify listings and handle users, reviews, complaints and refunds. The
+React frontend communicates with an Express API, while all live application
+data is stored in MySQL. Payments and subscriptions are intentionally simulated
+for the college project, so no real money is transferred.”
+
+
+SHARED CLOSING — 45 TO 60 SECONDS
+=================================
+
+Any one member can say:
+
+“The final application covers the complete journey from discovery to verified
+listing, owner approval, payment, cancellation and refund. It contains 40
+realistic owner accounts, 60 resident accounts, 44 hostel properties, 176 room
+types and 480 bookings. We tested authentication, authorization, booking
+concurrency, payments, plans and MySQL integrity through automated API and
+browser workflows. The application is ready as a complete local demonstration;
+real deployment would require a live payment provider, email/SMS delivery,
+managed media storage and production monitoring.”
+
+
+DEMO ACCOUNT ASSIGNMENT
+=======================
+
+Member 1 — Resident
+Email: resident.001@hostelhub.test
+Password: HostelHub@123
+
+Member 2 — Hostel owner
+Email: priya.raman@hostelhub.test
+Password: HostelHub@123
+
+Member 3 — Administrator
+Email: admin@hostelhub.test
+Password: HostelHub@123
+
+For the connected booking demonstration, Member 1 should choose a published
+property owned by Priya Raman so Member 2 can approve the same request.
+
+
+FINAL PRESENTATION CHECKLIST
+============================
+
+- Start the application and MySQL before the presentation.
+- Use http://localhost:4000 consistently in every browser window.
+- Open three separate browser profiles or private windows for the three roles.
+- Confirm the Priya Raman property is approved and has available capacity.
+- Prepare dates that satisfy the hostel’s minimum stay.
+- Keep the demo payment response on “Approve payment” unless demonstrating a
+  deliberate failure and retry.
+- Never enter real card, UPI, identity or ownership information.
+- Mention clearly that payments, refunds and plan purchases are simulations.
+- Each member should understand the complete system, even when presenting only
+  their assigned module.

@@ -6,25 +6,26 @@ The CSV files in `seed-data/` are editable source data for this local applicatio
 
 | CSV | Rows | Purpose |
 | --- | ---: | --- |
-| owners.csv | 10 | Separate owner accounts with 2–3 properties each |
+| owners.csv | 40 | Separate owner accounts: 12 Basic and 28 Advanced |
 | guests.csv | 60 | Resident accounts and profiles |
-| hostels.csv | 24 | Properties across Chennai, Bengaluru, Hyderabad, Pune and Coimbatore |
-| rooms.csv | 96 | Single, twin, triple and four-sharing room types |
-| hostel_photos.csv | 72 | Ordered local image references |
-| hostel_amenities.csv | 136 | One amenity per property per row |
-| documents.csv | 23 | Fictional property declarations for the review workflow |
-| bookings.csv | 240 | Historical stays, residents, future stays, requests and cancellations |
-| payment_attempts.csv | 271 | Successful and declined demo attempts |
-| payments.csv | 188 | One successful payment per paid booking, including processed refunds |
-| booking_events.csv | 867 | Actor, timestamp and decision history |
-| reviews.csv | 100 | Reviews connected to completed stays |
-| messages.csv | 160 | Guest/owner conversations |
-| notifications.csv | 490 | Booking and portfolio updates |
-| complaints.csv | 20 | Open and resolved resident requests |
-| audit_log.csv | 344 | Recorded booking decisions |
+| hostels.csv | 44 | Properties across several Indian cities |
+| rooms.csv | 176 | Single, twin, triple and four-sharing room types |
+| hostel_photos.csv | 132 | Ordered local image references |
+| hostel_amenities.csv | 249 | One amenity per property per row |
+| documents.csv | 43 | Fictional property declarations for the review workflow |
+| bookings.csv | 480 | Historical stays, residents, future stays, requests and cancellations |
+| payment_attempts.csv | 541 | Successful and declined demo booking attempts |
+| payments.csv | 376 | One successful payment per paid booking, including processed refunds |
+| subscription_payments.csv | 12 | Representative ₹999 Advanced-plan demo payments |
+| booking_events.csv | 1733 | Actor, timestamp and decision history |
+| reviews.csv | 200 | Reviews connected to completed stays |
+| messages.csv | 320 | Guest/owner conversations |
+| notifications.csv | 1000 | Booking and portfolio updates |
+| complaints.csv | 40 | Open and resolved resident requests |
+| audit_log.csv | 688 | Recorded booking decisions |
 | wishlist.csv | 60 | Saved property references |
 
-There are 20 published listings, two pending review, one draft and one rejected. Published properties cover all five cities. Data uses stable IDs prefixed with `csv-` so it can coexist with earlier demo records. Existing records are not deleted or reassigned. The database may therefore contain more properties and accounts than the CSV totals.
+There are 40 published listings, two pending review, one draft and one rejected. Owners with multiple properties are Advanced, every Basic owner stays within one property/eight photos/no-offer limits, and representative paid-plan ledger rows use the same ₹999 price as the application. Data uses stable IDs prefixed with `csv-` so it can coexist with earlier demo records. Existing records are not deleted or reassigned. The database may therefore contain more properties and accounts than the CSV totals.
 
 ## Sign in
 

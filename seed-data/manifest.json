@@ -14,6 +14,7 @@
     "bookings": 480,
     "payment_attempts": 541,
     "payments": 376,
+    "subscription_payments": 12,
     "booking_events": 1733,
     "reviews": 200,
     "messages": 320,

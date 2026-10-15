@@ -108,7 +108,9 @@ const owners = names.map((name, i) => ({
   phone: "",
   bio: `Founder of ${brands[i]}. We manage furnished homes for students and working professionals, with an on-site caretaker and scheduled housekeeping.`,
   status: "active",
-  plan: ["Pro", "Advanced", "Basic"][i % 3],
+  // Owners with multiple generated properties are Advanced. The remaining
+  // distribution keeps paid adoption realistic while retaining Basic demos.
+  plan: i < 4 || i % 3 !== 2 ? "Advanced" : "Basic",
   created_at: stamp(-500 + i * 7),
 }));
 const first = [
@@ -991,6 +993,20 @@ for (const e of events.filter((e) =>
     detail: e.note,
     created_at: e.created_at,
   });
+const subscriptionPayments = owners
+  .filter((owner) => owner.plan === "Advanced")
+  .slice(0, 12)
+  .map((owner, index) => ({
+    id: `csv-plan-payment-${String(index + 1).padStart(3, "0")}`,
+    user_id: owner.id,
+    plan_code: "Advanced",
+    amount: 999,
+    status: "paid",
+    provider: "demo",
+    reference: `PLAN-SAMPLE-${String(index + 1).padStart(6, "0")}`,
+    created_at: stamp(-495 + index * 7, 10),
+    method: ["upi", "card", "netbanking"][index % 3],
+  }));
 const datasets = {
   owners,
   guests,
@@ -1002,6 +1018,7 @@ const datasets = {
   bookings,
   payment_attempts: attempts,
   payments,
+  subscription_payments: subscriptionPayments,
   booking_events: events,
   reviews,
   messages,

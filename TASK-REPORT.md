@@ -1,5 +1,7 @@
 # Hostel Hub — Task Report
 
+> Archived verification record from 10 October 2026. The subscription design described below was superseded on 14 October 2026 by the enforced Basic/Advanced plan system. See `docs/FULL-QA-AUDIT-2026-10-14.md` for the current implementation and results.
+
 Scope: the three requested tasks, performed against the **existing** codebase. No rebuild, no
 restyling, no stack change, no file reorganisation.
 
@@ -286,29 +288,27 @@ left it (see §7).
 
 ## 5. Task 3 — Subscription section
 
-### 5.1 Already implemented (verified working)
+### 5.1 Current implementation (supersedes the original scope)
 
 | Layer | Component |
 | --- | --- |
-| Database | `users.plan`; `payments` ledger with `kind='subscription'` |
-| API | `POST /api/owner/subscription` — validates `plan ∈ {Basic, Pro, Advanced}`, rejects re-selecting the current plan (409), refuses when demo mode is off (503), updates `users.plan`, writes a ledger row with a `PLAN-…` reference, notifies the owner |
-| Frontend | `/owner/plans` → `Plans` (`src/management.tsx:1027`) — three plans, confirmation modal, busy state, error toast |
-| Display | Owner plan badge on the listing detail (`src/homes.tsx:767`), admin member table Plan column, owner dashboard payment history |
+| Database | `users.plan`; `subscription_attempts`; subscription rows in `payments` with `plan_code='Advanced'` |
+| API | Advanced checkout attempt/completion and receipt endpoints; Basic downgrade endpoint; plan-aware reports, analytics and listing limits |
+| Frontend | `/owner/plans` displays exactly Basic and Advanced, including declined-payment retry, processing, success, receipt and downgrade confirmation |
+| Rules | Basic: 1 property, 8 photos, standard discovery and core totals. Advanced: 10 properties, 200 photos, priority discovery, property analytics, exports, discounts and offers. |
 
-Verified live: `Basic→Pro→Advanced` persists to `users.plan`, writes a ledger row of the right
-amount (Pro 499 / Advanced 999), and survives a fresh request. Same-plan reselection returns 409.
+Verified live: a failed ₹999 checkout preserves Basic; a successful checkout activates Advanced
+and writes a receipt-bearing ledger row; downgrade preserves existing data while applying Basic
+limits to future changes.
 
 ### 5.2 The gap that was closed
 
 B1 (§2.4): the owner **Payments** page could not display subscription charges. Fixed and verified.
 
-### 5.3 Deliberately NOT added
+### 5.3 Demo boundary
 
-Per your instruction ("fix the ledger bug only") and the existing design, I did **not** add
-plan-based feature gating, quotas, expiry or auto-renewal. The project documents this explicitly:
-plans "demonstrate the subscription workflow; feature limits are not enforced in this college
-edition". Adding enforcement would have changed unrelated owner workflows, which the project's own
-strict rules forbid. `DEMO_MODE=false` still disables the subscription simulation.
+Plan payments remain simulated and never transfer money. There is no automatic renewal. Setting
+`DEMO_MODE=false` disables simulated checkout.
 
 ---
 
@@ -336,7 +336,7 @@ Run against the already-running instance on `http://localhost:4000`, no duplicat
 | Health endpoint | `GET /api/health` | `{"ok":true,"payments":"demo"}` |
 | MySQL (not SQLite) confirmation | no `data/` directory exists; 11 live MySQL connections as `hostelhub` (10 on `hostel_hub`) | Confirmed |
 | Major workflows against MySQL | authentication (guest/owner/admin, 401 + suspended 403), browsing/filters, booking → approval → payment decline → retry → confirm → receipt → timeline, cancellation → admin refund, payment ledger + dashboard | **11 / 11 pass** |
-| **REQ: subscription payments in `GET /api/payments`** | owner subscribes (Pro) → `GET /api/payments` | **Pass** — 1 subscription row, `PLAN-…`, INR 499; also present in `/dashboard` |
+| **REQ: subscription payments in `GET /api/payments`** | owner activates Advanced → `GET /api/payments` | **Pass** — Advanced subscription row, `PLAN-…`, INR 999; also present in `/dashboard` |
 
 **Data safety.** Row counts were snapshotted before and after. **No table decreased.** All 14
 CSV-seeded tables kept their original rows; `seed_records` stayed at **2953** and `seed_imports` at

@@ -1,4 +1,5 @@
 import { bookingRows, bookingStatus } from "./booking-workflow.js";
+import { planFor } from "./plans.js";
 export function installPortfolio(app, db, { auth, demo, fail }) {
   app.get("/api/portfolio", auth("owner", "admin"), async (req, res) => {
     const all = await db.all(
@@ -65,12 +66,17 @@ export function installPortfolio(app, db, { auth, demo, fail }) {
         "SELECT m.*,h.name AS hostel_name,u.name AS sender_name FROM messages m JOIN hostels h ON h.id=m.hostel_id JOIN users u ON u.id=m.sender_id ORDER BY m.created_at DESC",
       )
     ).filter((m) => ids.has(m.hostel_id));
+    const advanced =
+      req.user.role === "admin" || planFor(req.user.plan).advancedAnalytics;
     res.json({
+      advanced,
       properties: all,
       stats: statsFor(ids),
-      performance: all
-        .filter((h) => ids.has(h.id))
-        .map((h) => ({ ...h, ...statsFor(new Set([h.id])) })),
+      performance: advanced
+        ? all
+            .filter((h) => ids.has(h.id))
+            .map((h) => ({ ...h, ...statsFor(new Set([h.id])) }))
+        : [],
       residents,
       arrivals: bookings.filter(
         (b) =>

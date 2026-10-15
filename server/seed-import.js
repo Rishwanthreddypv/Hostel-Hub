@@ -3,6 +3,7 @@ import { resolve, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { parseCSV } from "./csv.js";
+import { planFor } from "./plans.js";
 
 const columns = {
   owners: "id,name,email,phone,bio,status,plan,created_at",
@@ -19,6 +20,8 @@ const columns = {
     "id,booking_id,user_id,idempotency_key,method,outcome,status,amount,created_at,ready_at,completed_at",
   payments:
     "id,booking_id,user_id,kind,amount,status,provider,reference,created_at,method,refunded_at",
+  subscription_payments:
+    "id,user_id,plan_code,amount,status,provider,reference,created_at,method",
   booking_events:
     "id,booking_id,actor_id,actor_name,actor_role,event,status,note,created_at",
   reviews: "id,user_id,hostel_id,booking_id,rating,body,status,created_at",
@@ -36,7 +39,7 @@ const numeric = new Set(
 const enums = {
   "owners.status": ["active", "suspended"],
   "guests.status": ["active", "suspended"],
-  "owners.plan": ["Basic", "Pro", "Advanced"],
+  "owners.plan": ["Basic", "Advanced"],
   "guests.plan": ["Basic"],
   "hostels.status": ["draft", "pending", "approved", "rejected"],
   "hostels.gender": ["Boys", "Girls", "Co-living"],
@@ -70,6 +73,10 @@ const enums = {
     "Kitchen",
   ],
   "payments.method": ["upi", "card", "netbanking", "demo"],
+  "subscription_payments.plan_code": ["Advanced"],
+  "subscription_payments.status": ["paid"],
+  "subscription_payments.provider": ["demo"],
+  "subscription_payments.method": ["upi", "card", "netbanking"],
   "payment_attempts.method": ["upi", "card", "netbanking"],
   "booking_events.actor_role": ["user", "owner", "admin"],
 };
@@ -311,6 +318,12 @@ export function validateRelations(
       if (h && r.sender_id !== h.owner_id && r.recipient_id !== h.owner_id)
         err("message must include the property owner");
     }
+    if (name === "subscription_payments") {
+      const owner = users.get(r.user_id);
+      if (owner?.role !== "owner" || owner.plan !== "Advanced")
+        err("subscription payment requires an Advanced owner");
+      if (r.amount !== 999) err("Advanced subscription amount must be 999");
+    }
   };
   for (const [name, rows] of Object.entries(data))
     rows.forEach((r, i) => check(name, r, i));
@@ -318,6 +331,27 @@ export function validateRelations(
     const all = [...data.owners, ...data.guests];
     if (new Set(all.map((r) => r[field].toLowerCase())).size !== all.length)
       errors.push(`Duplicate ${field} across accounts`);
+  }
+  for (const owner of data.owners) {
+    const plan = planFor(owner.plan);
+    const hostels = data.hostels.filter((h) => h.owner_id === owner.id);
+    if (hostels.length > plan.maxProperties)
+      errors.push(
+        `owners.csv ${owner.id}: ${owner.plan} allows ${plan.maxProperties} properties, found ${hostels.length}`,
+      );
+    for (const hostel of hostels) {
+      const photos = data.hostel_photos.filter(
+        (photo) => photo.hostel_id === hostel.id,
+      );
+      if (photos.length > plan.maxPhotosPerProperty)
+        errors.push(
+          `hostel_photos.csv ${hostel.id}: ${owner.plan} allows ${plan.maxPhotosPerProperty} photos, found ${photos.length}`,
+        );
+      if (!plan.specialOffers && hostel.discount > 0)
+        errors.push(
+          `hostels.csv ${hostel.id}: discounts require the Advanced plan`,
+        );
+    }
   }
   for (const name of ["payments", "reviews"])
     if (new Set(data[name].map((r) => r.booking_id)).size !== data[name].length)
@@ -421,7 +455,15 @@ export async function importSeed(
       documents: data.documents,
       bookings: data.bookings,
       payment_attempts: data.payment_attempts,
-      payments: data.payments,
+      payments: [
+        ...data.payments,
+        ...data.subscription_payments.map((payment) => ({
+          ...payment,
+          booking_id: null,
+          kind: "subscription",
+          refunded_at: "",
+        })),
+      ],
       booking_events: data.booking_events,
       reviews: data.reviews,
       messages: data.messages,
@@ -480,6 +522,17 @@ export async function importSeed(
                 )
               : "";
           if (existing) {
+            // A schema migration may already have moved a managed record to the
+            // new source value (for example Pro -> Advanced). Reconcile its
+            // hashes instead of misclassifying the migration as a live edit.
+            if (managed && currentHash === digest) {
+              await tx.run(
+                "UPDATE seed_records SET source_hash=?,applied_hash=? WHERE entity=? AND record_id=?",
+                [digest, digest, table, key],
+              );
+              summary.skipped++;
+              continue;
+            }
             if (!managed || managed.applied_hash !== currentHash) {
               summary.skipped++;
               summary.preserved.push(`${table}:${key}`);

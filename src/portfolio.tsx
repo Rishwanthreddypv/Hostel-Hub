@@ -125,7 +125,16 @@ export function Portfolio({
           </button>
         ))}
       </div>
-      {tab === "properties" && (
+      {tab === "properties" && !data.advanced && (
+        <div className="info-box">
+          Property-by-property revenue and occupancy analytics are available on
+          Advanced. Your booking queues and portfolio totals remain available.
+          <Link className="text-button" to="/owner/plans">
+            Compare plans <ArrowUpRight size={16} />
+          </Link>
+        </div>
+      )}
+      {tab === "properties" && data.advanced && (
         <div className="panel table-wrap">
           <table>
             <thead>
@@ -353,10 +362,14 @@ export function Payments() {
                     <Badge status={p.status}>{p.status}</Badge>
                   </td>
                   <td>
-                    {p.booking_id && (
+                    {(p.booking_id || p.kind === "subscription") && (
                       <a
                         className="text-button"
-                        href={`/api/bookings/${p.booking_id}/receipt`}
+                        href={
+                          p.booking_id
+                            ? `/api/bookings/${p.booking_id}/receipt`
+                            : `/api/subscription-payments/${p.id}/receipt`
+                        }
                       >
                         <Download size={15} />
                         Receipt
