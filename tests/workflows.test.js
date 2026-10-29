@@ -6,7 +6,7 @@ import { createApp } from "../server/app.js";
 import { seed } from "../server/seed-legacy.js";
 import { recordBookingEvent } from "../server/booking-workflow.js";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 let db, app, temp;
@@ -51,12 +51,28 @@ async function login(role = "user") {
 }
 async function register(role = "user") {
   const a = request.agent(app);
-  const r = await post(a, "/auth/register", {
-    name: "Test Member",
-    email: `${randomUUID()}@example.test`,
+  const email = `${randomUUID()}@example.test`;
+  const r = await a
+    .post("/api/auth/register")
+    .set("X-HostelHub-Client", "test")
+    .field("name", "Test Member")
+    .field("email", email)
+    .field("password", "StrongPass@123")
+    .field("role", role)
+    .field("document_type", "college_id")
+    .field("consent", "true")
+    .attach("document", Buffer.from("%PDF-1.4\nDemo identity"), "identity.pdf")
+    .expect(201);
+  const admin = await login("admin");
+  await post(
+    admin,
+    `/admin/identity-verifications/${r.body.verification.id}/review`,
+    { status: "approved", note: "Test identity verified" },
+  ).expect(200);
+  await post(a, "/auth/login", {
+    email,
     password: "StrongPass@123",
-    role,
-  }).expect(201);
+  }).expect(200);
   return { a, user: r.body.user };
 }
 async function activateAdvanced(agent, outcome = "success") {
@@ -120,6 +136,100 @@ test("authentication validates input, blocks admin registration and enforces rol
   const r = await a.get("/api/auth/me").expect(200);
   assert.equal(r.body.user.password, undefined);
   assert.equal(r.body.user.token_version, undefined);
+});
+test("new accounts require private identity review and rejected applicants can resubmit", async () => {
+  const applicant = request.agent(app);
+  const email = `${randomUUID()}@example.test`;
+  const registration = await applicant
+    .post("/api/auth/register")
+    .set("X-HostelHub-Client", "test")
+    .field("name", "Identity Applicant")
+    .field("email", email)
+    .field("password", "StrongPass@123")
+    .field("role", "user")
+    .field("document_type", "masked_aadhaar")
+    .field("consent", "true")
+    .attach(
+      "document",
+      Buffer.from("%PDF-1.4\nMasked demo identity"),
+      "masked-id.pdf",
+    )
+    .expect(201);
+  assert.equal(registration.body.user.status, "pending_verification");
+  await post(applicant, "/auth/login", {
+    email,
+    password: "StrongPass@123",
+  })
+    .expect(403)
+    .expect((r) =>
+      assert.match(r.body.error, /awaiting administrator approval/),
+    );
+  const verificationId = registration.body.verification.id;
+  const first = await db.get(
+    "SELECT * FROM identity_verifications WHERE id=?",
+    [verificationId],
+  );
+  assert.equal(first.status, "pending");
+  assert(existsSync(join(temp, "private", first.path)));
+  const guest = await login();
+  await guest
+    .get(`/api/identity-verifications/${verificationId}/document`)
+    .expect(403);
+  await request(app).get(`/uploads/private/${first.path}`).expect(404);
+  const admin = await login("admin");
+  await admin
+    .get(`/api/identity-verifications/${verificationId}/document`)
+    .expect(200);
+  const dashboard = await admin.get("/api/dashboard").expect(200);
+  assert.equal(dashboard.body.stats.pending_accounts, 1);
+  assert.equal(dashboard.body.identity_verifications[0].user_email, email);
+  await post(admin, `/admin/identity-verifications/${verificationId}/review`, {
+    status: "rejected",
+    note: "The uploaded image is not clear enough",
+  }).expect(200);
+  await post(applicant, "/auth/login", {
+    email,
+    password: "StrongPass@123",
+  })
+    .expect(403)
+    .expect((r) => assert.match(r.body.error, /not clear enough/));
+  await applicant
+    .post("/api/auth/verification/resubmit")
+    .set("X-HostelHub-Client", "test")
+    .field("email", email)
+    .field("password", "StrongPass@123")
+    .field("document_type", "college_id")
+    .field("consent", "true")
+    .attach(
+      "document",
+      Buffer.from("%PDF-1.4\nClear demo identity"),
+      "college-id.pdf",
+    )
+    .expect(200);
+  const replacement = await db.get(
+    "SELECT * FROM identity_verifications WHERE id=?",
+    [verificationId],
+  );
+  assert.equal(replacement.status, "pending");
+  assert.equal(replacement.review_note, "");
+  assert.notEqual(replacement.path, first.path);
+  assert.equal(existsSync(join(temp, "private", first.path)), false);
+  await post(admin, `/admin/identity-verifications/${verificationId}/review`, {
+    status: "approved",
+    note: "Replacement document verified",
+  }).expect(200);
+  await post(applicant, "/auth/login", {
+    email,
+    password: "StrongPass@123",
+  }).expect(200);
+  assert.equal(
+    (await applicant.get("/api/auth/me")).body.user.status,
+    "active",
+  );
+  await post(admin, `/admin/identity-verifications/${verificationId}/review`, {
+    status: "approved",
+    note: "Duplicate decision",
+  }).expect(409);
 });
 test("CSRF rejects missing client header and foreign origin", async () => {
   await request(app).post("/api/auth/login").send({}).expect(403);
@@ -248,10 +358,16 @@ test("Basic and Advanced limits, offers and downgrade preservation stay consiste
     photos: Array.from({ length: 8 }, photo),
     rooms: [{ name: "Twin", sharing: 2, rent: 8000, capacity: 4, ac: true }],
   };
-  await post(owner, "/owner/hostels", { ...listing, photos: [...listing.photos, photo()] }).expect(400);
+  await post(owner, "/owner/hostels", {
+    ...listing,
+    photos: [...listing.photos, photo()],
+  }).expect(400);
   await post(owner, "/owner/hostels", { ...listing, discount: 5 }).expect(403);
   await post(owner, "/owner/hostels", listing).expect(201);
-  await post(owner, "/owner/hostels", { ...listing, name: "Second Basic home" }).expect(403);
+  await post(owner, "/owner/hostels", {
+    ...listing,
+    name: "Second Basic home",
+  }).expect(403);
 
   await activateAdvanced(owner);
   const advanced = await post(owner, "/owner/hostels", {
@@ -267,7 +383,9 @@ test("Basic and Advanced limits, offers and downgrade preservation stay consiste
     discount: 10,
     photos: [...listing.photos, photo()],
   };
-  await patch(owner, `/owner/hostels/${advanced.body.id}`, existing).expect(200);
+  await patch(owner, `/owner/hostels/${advanced.body.id}`, existing).expect(
+    200,
+  );
   await patch(owner, `/owner/hostels/${advanced.body.id}`, {
     ...existing,
     photos: [...existing.photos, photo()],
@@ -276,10 +394,7 @@ test("Basic and Advanced limits, offers and downgrade preservation stay consiste
     ...existing,
     discount: 11,
   }).expect(403);
-  assert.equal(
-    (await owner.get("/api/owner/hostels")).body.hostels.length,
-    2,
-  );
+  assert.equal((await owner.get("/api/owner/hostels")).body.hostels.length, 2);
 });
 test("subscriptions, complaints and CSV reports work across roles", async () => {
   const owner = await login("owner"),

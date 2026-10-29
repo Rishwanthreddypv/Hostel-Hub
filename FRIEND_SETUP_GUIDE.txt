@@ -267,6 +267,15 @@ They use the same password: HostelHub@123
 
 The login page also contains demo account shortcuts and an owner selector.
 
+New self-registered guest and owner accounts are not activated immediately.
+Registration requires one fictional JPEG, PNG or PDF identity document up to
+5 MB. The account enters pending_verification status. Sign in as the Admin,
+open Account verification, inspect the private document, enter a review note,
+and approve or reject it. Approved accounts can sign in. A rejected applicant
+can enter the same email and password on the login page, then replace the
+document and resubmit. Existing seeded demo accounts remain active. Never use a
+real Aadhaar or other real identity document in this demonstration.
+
 
 9. COMPLETE BOOKING AND PAYMENT TEST
 ====================================

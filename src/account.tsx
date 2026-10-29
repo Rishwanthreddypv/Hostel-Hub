@@ -31,7 +31,13 @@ export function Auth({ register = false }: { register?: boolean }) {
     [password, setPassword] = useState(""),
     [name, setName] = useState(""),
     [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [documentType, setDocumentType] = useState("masked_aadhaar"),
+    [document, setDocument] = useState<File | null>(null),
+    [consent, setConsent] = useState(false),
+    [resubmit, setResubmit] = useState(false),
+    [canResubmit, setCanResubmit] = useState(false),
+    [submitted, setSubmitted] = useState("");
   const navigate = useNavigate();
   if (user)
     return (
@@ -49,26 +55,48 @@ export function Auth({ register = false }: { register?: boolean }) {
     e?.preventDefault();
     setBusy(true);
     setError("");
+    setCanResubmit(false);
     try {
-      const result = await api(
-        "/auth/" + (register ? "register" : "login"),
-        "POST",
-        {
-          email: quick
-            ? config.demo_accounts?.find(
-                (a: any) =>
-                  a.id ===
-                  (quick === "owner"
-                    ? "csv-owner-01"
-                    : quick === "user"
-                      ? "csv-guest-001"
-                      : "admin-demo"),
-              )?.email || `${quick}@hostelhub.test`
-            : email,
-          password: quick ? "HostelHub@123" : password,
-          ...(register ? { name, role } : {}),
-        },
-      );
+      let result;
+      if (register || resubmit) {
+        if (!document) throw new Error("Choose an identity document to upload");
+        if (!consent)
+          throw new Error("Confirm that the document belongs to you");
+        const form = new FormData();
+        form.append("email", email);
+        form.append("password", password);
+        form.append("document_type", documentType);
+        form.append("consent", "true");
+        form.append("document", document);
+        if (register) {
+          form.append("name", name);
+          form.append("role", role);
+        }
+        result = await api(
+          resubmit ? "/auth/verification/resubmit" : "/auth/register",
+          "POST",
+          form,
+        );
+        setSubmitted(
+          result.message ||
+            "Your identity document was submitted for administrator review.",
+        );
+        return;
+      }
+      result = await api("/auth/login", "POST", {
+        email: quick
+          ? config.demo_accounts?.find(
+              (a: any) =>
+                a.id ===
+                (quick === "owner"
+                  ? "csv-owner-01"
+                  : quick === "user"
+                    ? "csv-guest-001"
+                    : "admin-demo"),
+            )?.email || `${quick}@hostelhub.test`
+          : email,
+        password: quick ? "HostelHub@123" : password,
+      });
       await refresh();
       navigate(
         result.user.role === "owner"
@@ -79,7 +107,9 @@ export function Auth({ register = false }: { register?: boolean }) {
       );
       toast("Welcome " + result.user.name.split(" ")[0] + ".");
     } catch (e) {
-      setError((e as Error).message);
+      const message = (e as Error).message;
+      setError(message);
+      setCanResubmit(message.includes("verification was rejected"));
     } finally {
       setBusy(false);
     }
@@ -106,68 +136,166 @@ export function Auth({ register = false }: { register?: boolean }) {
           Back to exploring
         </Link>
         <span className="eyebrow">WELCOME TO HOSTEL HUB</span>
-        <h1>{register ? "Make yourself at home." : "Welcome back."}</h1>
+        <h1>
+          {register
+            ? "Make yourself at home."
+            : resubmit
+              ? "Replace your document."
+              : "Welcome back."}
+        </h1>
         <p>
           {register
-            ? "A new chapter is just around the corner."
-            : "Your next home is waiting for you."}
+            ? "Create your account and submit one identity document for review."
+            : resubmit
+              ? "Upload a clear replacement. Your account will return to the admin review queue."
+              : "Your next home is waiting for you."}
         </p>
-        <form onSubmit={submit}>
-          <ErrorBox error={error} />
-          {register && (
-            <>
-              <div className="segmented">
-                {["user", "owner"].map((r) => (
-                  <button
-                    type="button"
-                    className={role === r ? "active" : ""}
-                    key={r}
-                    onClick={() => setRole(r)}
+        {submitted ? (
+          <div className="verification-success">
+            <Check size={28} />
+            <h2>Submitted for review</h2>
+            <p>{submitted}</p>
+            <p>
+              An administrator must approve the account before it can sign in.
+            </p>
+            <Link className="button full" to="/login">
+              Return to sign in
+            </Link>
+          </div>
+        ) : (
+          <form onSubmit={submit}>
+            <ErrorBox error={error} />
+            {canResubmit && !resubmit && (
+              <button
+                type="button"
+                className="button secondary full"
+                onClick={() => {
+                  setResubmit(true);
+                  setError("");
+                }}
+              >
+                Replace document and resubmit
+              </button>
+            )}
+            {register && (
+              <>
+                <div className="segmented">
+                  {["user", "owner"].map((r) => (
+                    <button
+                      type="button"
+                      className={role === r ? "active" : ""}
+                      key={r}
+                      onClick={() => setRole(r)}
+                    >
+                      {r === "user"
+                        ? "I’m finding a home"
+                        : "I’m a hostel owner"}
+                    </button>
+                  ))}
+                </div>
+                <Field label="Full name">
+                  <input
+                    autoComplete="name"
+                    required
+                    maxLength={120}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </Field>
+              </>
+            )}
+            <Field label="Email address">
+              <input
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+              />
+            </Field>
+            <Field label="Password">
+              <input
+                type="password"
+                autoComplete={register ? "new-password" : "current-password"}
+                required
+                minLength={register ? 10 : 1}
+                maxLength={72}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={
+                  register ? "At least 10 characters" : "Your password"
+                }
+              />
+            </Field>
+            {(register || resubmit) && (
+              <div className="identity-upload">
+                <div className="info-box">
+                  Use a masked Aadhaar, college or employee ID, driving licence,
+                  passport, or another government ID. For Aadhaar, hide the
+                  first eight digits. Use only demo documents in this project.
+                </div>
+                <Field label="Document type">
+                  <select
+                    required
+                    value={documentType}
+                    onChange={(e) => setDocumentType(e.target.value)}
                   >
-                    {r === "user" ? "I’m finding a home" : "I’m a hostel owner"}
-                  </button>
-                ))}
+                    <option value="masked_aadhaar">Masked Aadhaar</option>
+                    <option value="college_id">College ID</option>
+                    <option value="employee_id">Employee ID</option>
+                    <option value="driving_licence">Driving licence</option>
+                    <option value="passport">Passport</option>
+                    <option value="other_government_id">
+                      Other government ID
+                    </option>
+                  </select>
+                </Field>
+                <Field label="Identity document (JPEG, PNG or PDF; maximum 5 MB)">
+                  <input
+                    type="file"
+                    required
+                    accept="image/jpeg,image/png,application/pdf"
+                    onChange={(e) => setDocument(e.target.files?.[0] || null)}
+                  />
+                </Field>
+                <label className="consent-check">
+                  <input
+                    type="checkbox"
+                    checked={consent}
+                    onChange={(e) => setConsent(e.target.checked)}
+                  />
+                  <span>
+                    I confirm that this document belongs to me and may be
+                    reviewed by a Hostel Hub administrator for this demo
+                    account.
+                  </span>
+                </label>
               </div>
-              <Field label="Full name">
-                <input
-                  autoComplete="name"
-                  required
-                  maxLength={120}
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </Field>
-            </>
-          )}
-          <Field label="Email address">
-            <input
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-            />
-          </Field>
-          <Field label="Password">
-            <input
-              type="password"
-              autoComplete={register ? "new-password" : "current-password"}
-              required
-              minLength={register ? 10 : 1}
-              maxLength={72}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={
-                register ? "At least 10 characters" : "Your password"
-              }
-            />
-          </Field>
-          <button disabled={busy} className="button full">
-            {busy ? "Please wait…" : register ? "Create account" : "Sign in"}
-            <ArrowRight size={17} />
+            )}
+            <button disabled={busy} className="button full">
+              {busy
+                ? "Please wait…"
+                : register
+                  ? "Submit account for verification"
+                  : resubmit
+                    ? "Resubmit identity document"
+                    : "Sign in"}
+              <ArrowRight size={17} />
+            </button>
+          </form>
+        )}
+        {resubmit && !submitted && (
+          <button
+            className="text-button"
+            onClick={() => {
+              setResubmit(false);
+              setError("");
+            }}
+          >
+            Back to sign in
           </button>
-        </form>
+        )}
         <p className="auth-switch">
           {register ? "Already feel at home?" : "New around here?"}{" "}
           <Link to={register ? "/login" : "/register"}>

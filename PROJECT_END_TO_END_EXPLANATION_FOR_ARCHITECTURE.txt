@@ -1,0 +1,1948 @@
+HOSTEL HUB — VERIFIED END-TO-END PROJECT EXPLANATION
+====================================================
+
+Purpose of this document
+------------------------
+This document describes the Hostel Hub project as it is implemented in the
+current source code. It is intended to be given to another ChatGPT session or a
+diagramming tool as the factual source for a complete architecture diagram.
+
+The description was prepared by inspecting the frontend source, Express API,
+business-rule modules, database adapter, schema migrations, CSV importer,
+configuration, tests, and audit scripts. Features listed under “Not implemented”
+must not be shown as active components in an architecture diagram.
+
+
+1. SYSTEM PURPOSE
+=================
+
+Hostel Hub is a local full-stack hostel discovery and booking application for
+three roles:
+
+1. Resident/User
+   - Registers or signs in.
+   - Searches approved hostels and room inventory.
+   - Applies filters and sorting.
+   - Uses map view, wishlist and comparison.
+   - Contacts hostel owners through in-app messages.
+   - Requests one to four beds for a date range.
+   - Waits for owner approval.
+   - Completes a simulated payment.
+   - Downloads a receipt.
+   - Cancels a booking and views the server-calculated refund.
+   - Reviews an eligible stay.
+   - Receives notifications and creates support requests.
+
+2. Hostel Owner
+   - Has an independent login stored in the common users table.
+   - Can own and manage one or more hostel properties according to plan limits.
+   - Manages property information, room types, bed capacity, rent and photos.
+   - Uploads private verification documents.
+   - Submits listings for admin verification.
+   - Views only bookings, messages, payments and analytics connected to the
+     owner’s properties.
+   - Approves or rejects booking requests.
+   - Marks eligible stays completed.
+   - Uses either the Basic or Advanced plan.
+
+3. Administrator
+   - Uses an admin account that cannot be created through public registration.
+   - Reviews submitted hostel listings and private documents.
+   - Approves or rejects listings with a note.
+   - Suspends or reactivates non-admin accounts.
+   - Moderates reviews.
+   - Resolves support complaints.
+   - Processes simulated refunds.
+   - Views platform-wide hostels, users, bookings, payments, subscription
+     attempts, analytics, import history and audit history.
+
+This project is a working local demonstration. Booking payments, subscription
+payments and refunds are simulations. No real money is transferred.
+
+
+2. IMPLEMENTED TECHNOLOGY STACK
+===============================
+
+Frontend
+--------
+- React 19.
+- TypeScript 5.
+- React Router 7.
+- Vite 7 for development and production builds.
+- Leaflet for OpenStreetMap rendering.
+- Lucide React for icons.
+- A project-specific responsive CSS file; no separate UI framework is used.
+
+Backend
+-------
+- Node.js 24 or newer.
+- Express 5.
+- Zod for request validation.
+- bcryptjs for password hashing.
+- jsonwebtoken for signed session tokens.
+- cookie-parser for the session cookie.
+- express-rate-limit for API and login limits.
+- Helmet for HTTP security headers and Content Security Policy.
+- Multer with memory storage for validated uploads.
+
+Database
+--------
+- The current local installation is configured to use MySQL database
+  “hostel_hub” through mysql2/promise and DATABASE_URL.
+- The code also implements SQLite through Node’s built-in node:sqlite module.
+- An explicit SQLite path is used by automated tests so tests do not inherit the
+  live MySQL connection from .env.
+- Both engines are accessed through the same small adapter with all(), get(),
+  run(), transaction(), lock and close operations.
+
+Storage and external resources
+------------------------------
+- Public listing photos are stored under uploads/.
+- Private verification documents are stored under uploads/private/.
+- Bundled sample images and fonts are under public/.
+- The browser loads map tiles from OpenStreetMap.
+- A listing can open an external Google Maps search link.
+- An OpenAI-compatible assistant provider is optional. Without AI credentials,
+  the implemented local database-search assistant is used.
+
+Testing
+-------
+- Node’s built-in test runner.
+- Supertest for Express API tests.
+- Playwright with Microsoft Edge for browser workflows.
+- Dedicated scripts for live MySQL API, browser, UI-surface and integrity audits.
+
+
+3. HIGH-LEVEL RUNTIME ARCHITECTURE
+==================================
+
+Normal production-style local start
+-----------------------------------
+1. npm start executes server/index.js.
+2. server/index.js loads environment variables.
+3. createDatabase() selects MySQL or SQLite from configuration.
+4. The database adapter creates missing base tables and runs additive migrations.
+5. Outside production, when DEMO_MODE is not false, seed() ensures bootstrap demo
+   accounts exist and imports CSV data only when a successful import does not
+   already exist. A forced seed command can apply reviewed source changes.
+6. createApp() builds the Express application and installs middleware and routes.
+7. Express listens on HOST, default 127.0.0.1, and PORT, default 4000.
+8. If dist/ exists, Express serves the compiled React single-page application.
+9. Requests for unknown frontend routes return dist/index.html so React Router can
+   resolve the client route.
+10. SIGINT or SIGTERM closes the HTTP server and database connection cleanly.
+
+Development start
+-----------------
+- npm run dev starts two processes with concurrently:
+  1. Node/Express on port 4000 with file watching.
+  2. Vite on 127.0.0.1:5173.
+- Vite proxies /api and /uploads to 127.0.0.1:4000.
+- In the built application, browser, API and uploads share the Express origin.
+
+Browser-to-server communication
+-------------------------------
+- src/api.ts contains the shared api() wrapper.
+- Requests are sent to /api plus the requested path.
+- credentials: include sends the HTTP-only session cookie.
+- Mutation requests include X-HostelHub-Client: web.
+- JSON payloads use Content-Type: application/json.
+- Upload payloads use FormData and multipart/form-data.
+- Non-success responses are converted to JavaScript Error objects using the
+  backend’s JSON error message.
+
+
+4. FRONTEND ARCHITECTURE
+========================
+
+4.1 Application shell and global state
+--------------------------------------
+File: src/main.tsx
+
+The App component initializes:
+- user: the current authenticated user or null.
+- ready: whether initial session/config loading has finished.
+- config: demo mode, facilities, plan definitions, assistant mode and demo
+  accounts returned by GET /api/config.
+- saved: current user’s wishlist hostel IDs.
+- compare: up to three hostel IDs saved in browser localStorage under hh-compare.
+- toastText: transient UI feedback.
+
+Initial load performs:
+- GET /api/auth/me.
+- GET /api/wishlist when a user exists.
+- GET /api/config.
+
+Only the comparison shortlist uses browser localStorage. Accounts, profiles,
+hostels, rooms, bookings, payments, reviews, messages, notifications, support
+requests and plans are server/database data.
+
+The shell renders:
+- Role-sensitive header navigation.
+- React Router routes.
+- Footer.
+- Search assistant.
+- Floating compare link when the compare shortlist is non-empty.
+- Toast feedback.
+
+The header polls notifications every 20 seconds for the signed-in user.
+
+4.2 Frontend routes
+-------------------
+Public routes:
+- /                         Explore/search page.
+- /hostels/:id              Hostel detail page.
+- /login                    Login page.
+- /register                 Resident or owner registration.
+- /compare                  Comparison page; selection is device-local.
+
+Any authenticated role:
+- /wishlist                 Saved hostels.
+- /bookings                 Role-aware booking workspace.
+- /profile                  Profile and password management.
+- /payments                 Role-scoped payment ledger and receipts.
+- /notifications            Current user notifications.
+- /messages                 Current user conversations.
+- /support                  Current user support requests; admin can resolve.
+
+Owner-only frontend routes:
+- /owner                    Owner dashboard and property management.
+- /owner/plans              Basic/Advanced plan page.
+
+Admin-only frontend route:
+- /admin                    Admin management dashboard.
+
+Unknown frontend routes render a friendly not-found state.
+
+The frontend Guard component prevents unauthenticated rendering and displays a
+role-mismatch state. This is a convenience layer. Actual access control is also
+enforced by the Express API and database ownership queries.
+
+4.3 Shared UI layer
+-------------------
+File: src/shared.tsx
+
+Implemented shared pieces:
+- React context and useApp().
+- Facility Icon mapping.
+- Badge.
+- Empty state.
+- Loading state.
+- Accessible Modal with initial focus, Escape handling, focus trapping and focus
+  restoration.
+- Field label wrapper.
+- useLoad() API-loading hook.
+- ErrorBox.
+- Guard.
+- PageTitle.
+
+4.4 Account, notification, communication and support UI
+-------------------------------------------------------
+File: src/account.tsx
+
+Auth component:
+- Supports login and registration.
+- Registration selects resident/user or hostel owner.
+- Admin is not offered as a public registration role.
+- Demo login shortcuts are populated from server configuration.
+- After authentication, navigation depends on the returned role.
+
+Profile component:
+- Updates name, phone and biography.
+- Changes password after current-password verification.
+- A password change signs the user out because the backend increments the token
+  version.
+
+Notifications component:
+- Loads current-user notifications.
+- Can mark all of the user’s notifications read.
+- Polls every 20 seconds.
+
+Messages component:
+- Loads conversations in which the current user is sender or recipient.
+- Residents contact a property owner.
+- Owners can reply only to guests who previously contacted that owner’s listing.
+- Polls every 15 seconds.
+
+Support component:
+- Creates a complaint/support request with subject and body.
+- Can optionally associate an owned booking through the API.
+- Normal users see their own requests.
+- Admin sees all requests and can submit a resolution.
+
+4.5 Hostel discovery UI
+-----------------------
+File: src/homes.tsx
+
+HostelCard displays:
+- Primary photo.
+- Name and location.
+- Gender category.
+- Rating or “New”.
+- Minimum rent.
+- Optional calculated distance.
+- Selected facilities.
+- Wishlist and compare controls.
+
+Explore supports:
+- Text search for hostel, city, area, neighbourhood or nearby institution text.
+- Gender: Boys, Girls or Co-living.
+- Monthly budget.
+- Room sharing: one to four.
+- AC or non-AC.
+- Minimum rating.
+- Move-in and move-out date availability.
+- Facilities: Wi-Fi, Food, Parking, Laundry, Security, Gym, Power backup and
+  Kitchen.
+- Optional latitude, longitude and maximum distance.
+- Sort by recommended, low price, high price or rating.
+- Grid/listing display and map display.
+
+Wishlist mode reuses Explore and filters the returned approved inventory using
+the signed-in user’s saved hostel IDs.
+
+MapView:
+- Uses Leaflet.
+- Uses each hostel’s stored latitude and longitude.
+- Loads OpenStreetMap tiles from the internet.
+
+Details displays:
+- Listing photos.
+- Name, description, address, city and area.
+- Gender.
+- Published rating and reviews.
+- Facilities.
+- Room types, sharing, AC flag, monthly per-bed rent, capacity and calculated
+  availability.
+- Deposit, discount, food charge, service charge and configured tax.
+- Minimum-stay rule.
+- Check-in/check-out times.
+- Nearby places.
+- Refund policy.
+- Contact telephone link.
+- Leaflet map and external Google Maps link.
+- Booking request form for residents.
+- In-app owner contact form.
+
+Compare:
+- Compares at most three selected hostels.
+- Displays price, deposit, gender, location, rating, facilities and availability.
+- Compare IDs are stored locally in the browser, not in MySQL.
+
+4.6 Booking and checkout UI
+---------------------------
+Files:
+- src/bookings.tsx
+- src/checkout.tsx
+
+The booking workspace changes its copy, filters, queues and actions based on the
+current role. It supports:
+- Active, refund and past/cancelled queues.
+- Property filter for owners/admins.
+- Status filter.
+- Guest, hostel or booking-ID search.
+- Sorting.
+- Payment-window countdown.
+- Allowed-action buttons supplied by the server.
+- Booking detail modal.
+- Event timeline.
+- Payment-attempt history.
+- Refund previews.
+- Required owner rejection reason.
+- Optional resident cancellation reason.
+- Review form for eligible resident stays.
+
+The booking list refreshes every 15 seconds while the page is active. A local
+one-second clock uses the server-time offset for countdown display.
+
+Checkout supports:
+- UPI, card and net banking as simulated methods.
+- Sample display-only payment instrument details.
+- “Approve payment” or “Decline payment to test retry” demo outcome.
+- User consent acknowledging the demo and refund terms.
+- Processing state lasting at least 1.5 seconds.
+- Status recheck.
+- Failed attempt and retry.
+- Successful confirmation.
+- Downloadable HTML booking receipt.
+
+No bank credentials or actual payment provider is contacted.
+
+4.7 Owner, admin and plan UI
+----------------------------
+File: src/management.tsx
+
+Owner page:
+- Loads /api/dashboard and /api/owner/hostels.
+- Displays work queues and statistics.
+- Links to bookings, messages, plans and reports.
+- Shows report export only when the current plan allows it.
+- Disables new-property creation when the current plan quota is reached.
+- Lists the owner’s properties, status, room types and documents.
+- Opens listing editor, room editor and document manager.
+- Submits a listing for review.
+
+Listing editor supports:
+- Name, city, area, address and description.
+- Gender.
+- Facilities.
+- Deposit.
+- Discount.
+- Minimum stay.
+- Food charge, service charge and tax percentage.
+- Coordinates.
+- Nearby information.
+- Check-in and check-out times.
+- Contact and refund policy.
+- Photo uploads.
+- A required first room type during property creation.
+
+The UI reads quotas from GET /api/config. Basic disables discounts and limits
+photos to eight; Advanced allows the configured higher quota and offers.
+
+Room editor supports:
+- Room type name.
+- Sharing from one to four.
+- Per-bed monthly rent.
+- Total bed capacity for the room type.
+- AC flag.
+
+Admin page:
+- Loads the admin form of /api/dashboard.
+- Shows Basic owner count, Advanced owner count and simulated subscription
+  revenue.
+- Shows all listings and pending listings.
+- Opens private documents for review.
+- Approves or rejects a pending listing with a note.
+- Lists users with role, plan and status.
+- Suspends/reactivates non-admin users.
+- Publishes or hides reviews.
+- Displays booking and subscription payments.
+- Displays recent subscription attempts.
+- Displays audit history and CSV import history.
+- Links to booking/refund and support workspaces.
+
+Plans page:
+- Displays exactly Basic and Advanced using server-provided plan configuration.
+- Shows current property and photo usage.
+- Advanced checkout supports UPI/card/net banking, failure, retry, processing,
+  success and receipt download.
+- Basic downgrade shows a preservation warning.
+- Existing properties and bookings are not deleted by downgrade.
+
+4.8 Portfolio and payment UI
+----------------------------
+File: src/portfolio.tsx
+
+Portfolio:
+- Available to owner and admin roles.
+- Supports an optional property filter.
+- Displays bed count, occupied beds, requests, awaiting-payment count, gross
+  collections, processed refunds, net collections and pending refunds.
+- Displays residents, next-seven-day arrivals/departures, request queues,
+  payments, recent reviews and recent messages.
+- Admin can see recent CSV import summaries.
+- Property-level performance rows are returned for admins and Advanced owners.
+- Basic owners retain portfolio totals and queues but receive no property-level
+  performance array.
+
+Payments page:
+- Resident: own successful booking payments.
+- Owner: booking payments for owned properties plus the owner’s own subscription
+  payments.
+- Admin: all payment rows.
+- Booking payments link to HTML receipts.
+- Subscription payments link to plain-text demo subscription receipts.
+
+
+5. BACKEND APPLICATION ARCHITECTURE
+===================================
+
+5.1 Express construction and middleware
+---------------------------------------
+Main file: server/app.js
+
+createApp(db, options) configures:
+
+1. Demo/production behavior
+   - Demo mode defaults on only outside production unless overridden.
+   - Production requires a JWT_SECRET of at least 32 characters.
+   - Without a configured secret in development, a random secret is generated;
+     sessions therefore do not survive a process restart unless JWT_SECRET is set.
+
+2. Upload directories
+   - Creates uploads/ and uploads/private/ when missing.
+
+3. Helmet
+   - Disables x-powered-by.
+   - Sets a Content Security Policy.
+   - Allows local scripts/connections, inline CSS required by the app,
+     OpenStreetMap image tiles and Google frame origin.
+
+4. Body and cookie parsing
+   - JSON body limit: 1 MB.
+   - Cookie parser.
+
+5. Mutation request protection
+   - POST/PATCH/DELETE-like mutations require X-HostelHub-Client.
+   - If Origin is present, it must match configured APP_ORIGIN, approved local
+     Vite origins or the request’s own host origin.
+
+6. Rate limiting
+   - General /api limit: 300 requests per 60 seconds per limiter identity.
+   - Login/register limiter: 40 requests per 15 minutes.
+   - Assistant limiter: 15 requests per 60 seconds.
+
+7. SQLite serialization
+   - When the selected client is not MySQL, API requests are serialized around
+     the single SQLite connection to avoid interleaved asynchronous writes.
+
+8. Session restoration
+   - Reads hh_session from an HTTP-only cookie.
+   - Verifies HS256 JWT.
+   - Loads the user from the database on every authenticated request.
+   - Requires active account status.
+   - Requires JWT token version to match users.token_version.
+
+9. Role middleware
+   - auth() requires any signed-in user.
+   - auth("user"), auth("owner") or auth("admin") requires the named role.
+
+10. Error handling
+    - Zod errors return 400.
+    - Multer errors return 400.
+    - Application errors use their defined HTTP status.
+    - Duplicate/unique failures return 409.
+    - Unexpected errors are logged server-side and return a generic 500 response.
+
+5.2 Session and account behavior
+--------------------------------
+- Public registration accepts name, email, password, role=user/owner, identity
+  document type, consent and one JPEG, PNG or PDF identity document up to 5 MB.
+- Email is normalized to lowercase.
+- Password length is 10 to 72 characters.
+- Password is hashed with bcrypt cost 12.
+- Duplicate email returns conflict.
+- The account and identity metadata are inserted transactionally with user
+  status=pending_verification and verification status=pending.
+- Identity files use generated names under uploads/private and are not exposed
+  by the public /uploads route.
+- Active admins receive a stored notification about the new review.
+- Registration does not issue a session cookie.
+- Login compares the bcrypt hash and permits only active accounts. Pending,
+  rejected and suspended accounts receive status-specific errors.
+- Rejected applicants can authenticate only to the public resubmission endpoint,
+  replace the private document and return to the pending review queue.
+- Admin approval changes the account to active; rejection changes it to rejected
+  and records a required review note. Both actions are audited.
+- Session JWT expires after 12 hours.
+- Cookie is HttpOnly, SameSite=Strict, path=/ and Secure in production.
+- Logout increments users.token_version, invalidating existing tokens.
+- Password change verifies the old password, stores a new bcrypt hash, increments
+  token_version and clears the cookie.
+- Admin suspension also increments token_version, revoking active sessions.
+- Password hashes and token_version are removed from API user responses.
+
+
+6. API ENDPOINT INVENTORY
+=========================
+
+All paths below are relative to /api.
+
+Public/configuration
+--------------------
+- GET /health
+  Returns server health and demo-payment availability.
+- GET /config
+  Returns demo flag, facility names, Basic/Advanced definitions, assistant mode,
+  payment mode and demo-account choices.
+- GET /auth/me
+  Returns current public user or null.
+- POST /auth/register
+  Registers a pending user or owner with a required private identity document.
+- POST /auth/verification/resubmit
+  Replaces the document for a rejected or pending applicant after password check.
+- POST /auth/login
+  Creates session cookie.
+- GET /hostels
+  Returns approved listings from active owners with search/filter/sort support.
+- GET /hostels/:id
+  Returns approved listing detail and published reviews. The property owner and
+  admin can inspect unpublished listings.
+- POST /assistant
+  Returns local or optional-provider response and up to three matching hostels.
+
+Authenticated account
+---------------------
+- POST /auth/logout
+- PATCH /profile
+- POST /profile/password
+- GET /wishlist
+- POST /wishlist/:id
+- GET /notifications
+- POST /notifications/read
+- GET /messages
+- POST /messages
+- GET /complaints
+- POST /complaints
+- GET /payments
+
+Booking and review
+------------------
+- POST /bookings
+- GET /bookings
+- GET /bookings/:id
+- POST /bookings/:id/action
+- POST /bookings/:id/payment-attempts
+- POST /payment-attempts/:id/complete
+- GET /bookings/:id/receipt
+- POST /reviews
+- POST /bookings/:id/pay
+  This final route is retained only for older flow-version-1 bookings.
+
+Owner management
+----------------
+- POST /uploads/photo
+- GET /owner/hostels
+- POST /owner/hostels
+- PATCH /owner/hostels/:id
+- POST /owner/hostels/:id/rooms
+- PATCH /owner/rooms/:id
+- POST /owner/hostels/:id/documents
+- GET /documents/:id
+- POST /owner/hostels/:id/submit
+- GET /dashboard
+- GET /portfolio
+- GET /reports/bookings.csv
+
+Owner subscription
+------------------
+- GET /owner/subscription-attempts
+- POST /owner/subscription-attempts
+- POST /subscription-attempts/:id/complete
+- POST /owner/subscription
+  Implements downgrade to Basic; Advanced must use simulated checkout.
+- GET /subscription-payments/:id/receipt
+
+Admin management
+----------------
+- GET /dashboard
+- GET /portfolio
+- GET /bookings and role-scoped booking detail
+- POST /bookings/:id/action with refund action
+- POST /admin/hostels/:id/review
+- GET /identity-verifications/:id/document
+- POST /admin/identity-verifications/:id/review
+- POST /admin/users/:id/status
+- POST /admin/reviews/:id
+- POST /admin/complaints/:id
+- GET /reports/bookings.csv
+
+
+7. HOSTEL DISCOVERY BUSINESS RULES
+==================================
+
+Public inventory conditions
+---------------------------
+- A hostel must have status=approved.
+- Its owner must have status=active.
+- Unpublished or inactive-owner hostels are excluded from public search.
+- The hostel owner and admin can inspect unpublished detail through an
+  authenticated request.
+
+Searchable text
+---------------
+Every word of the text query must appear in the combined lowercase string of:
+- hostel name,
+- city,
+- area,
+- nearby text.
+
+Filters
+-------
+- Gender exact match.
+- Facilities: every requested facility must be present.
+- Budget: at least one room’s discounted rent must be within budget.
+- Sharing: at least one room has the requested sharing value.
+- AC: at least one room has the requested AC flag.
+- Availability: when dates are supplied, at least one room has available beds.
+- Rating: published-review average meets minimum.
+- Distance: backend calculates Haversine distance using supplied latitude and
+  longitude and optionally filters by maximum kilometres.
+
+Sorting
+-------
+- price-low: minimum room rent ascending.
+- price-high: minimum room rent descending.
+- rating: rating descending.
+- recommended/default: owner plan search priority, then discount, then rating.
+- Advanced has higher plan search priority than Basic.
+
+Availability calculation
+------------------------
+- Date intervals are treated as [start_date, end_date), allowing reuse on the
+  move-out date.
+- Occupancy is calculated as a quantity-weighted sweep of booking start/end
+  events.
+- Confirmed reservations occupy capacity.
+- Active flow-version-2 pending-owner and awaiting-payment holds occupy capacity
+  only before expires_at.
+- Expired unpaid holds release capacity without requiring a scheduled job.
+
+
+8. OWNER PROPERTY AND VERIFICATION FLOW
+=======================================
+
+Listing lifecycle
+-----------------
+1. A registered owner creates a listing.
+2. Creation requires at least one room type.
+3. Listing begins with status=draft.
+4. Owner uploads public photos.
+5. Owner uploads at least one private verification document.
+6. Submission checks that at least one photo and document exist.
+7. Listing changes to pending.
+8. Active admins receive a notification.
+9. Admin can approve or reject only a pending listing.
+10. Approval is blocked if no document exists.
+11. Approved listing is visible in public search.
+12. Rejection stores the admin note and notifies the owner.
+13. A material listing edit resets status to draft and clears the verification
+    note, requiring resubmission.
+
+Owner isolation
+---------------
+- Owner property queries use owner_id=req.user.id.
+- The owned() helper returns not found when the listing is missing or belongs to
+  another owner.
+- Room operations first identify the room’s hostel and then verify ownership.
+- Private document download permits only the recorded document owner or admin.
+- Booking lists and portfolio queries join through hostels.owner_id.
+
+Room capacity updates
+---------------------
+- Room capacity is a number of beds for a room type, not physical-room count.
+- Before reducing capacity, the backend calculates peak quantity across future
+  active reservations.
+- New capacity cannot be lower than the existing reservation peak.
+
+Upload handling
+---------------
+- Multer memory storage accepts one file with maximum size 8 MB.
+- The backend checks file signatures, not only browser MIME labels.
+- Public photo types: JPEG, PNG, WebP.
+- Private document types: PDF, JPEG, PNG, WebP.
+- Public photo filenames are generated UUIDs.
+- Public /uploads route accepts only generated image filename patterns.
+- uploads/private is not exposed through static middleware.
+- Private documents are downloaded through the authorized API route with
+  Cache-Control: no-store.
+
+
+9. BOOKING DOMAIN AND STATE MACHINE
+===================================
+
+9.1 New booking creation
+------------------------
+Only role=user can create a booking.
+
+Input:
+- room_id,
+- start_date,
+- end_date,
+- quantity from one to four beds,
+- optional guest_note up to 1,000 characters.
+
+Validation:
+- Move-in cannot be before the current UTC calendar date.
+- Move-out must be after move-in.
+- Stay must be between 7 and 366 nights.
+- The listing’s own minimum stay must also be satisfied.
+- Room must exist.
+- Hostel must be approved.
+- Owner must be active.
+- Available capacity must cover the requested quantity.
+- The same user cannot create an overlapping active booking at the same hostel.
+
+Concurrency:
+- Booking creation runs in a database transaction.
+- MySQL appends FOR UPDATE when loading the room, locking it during capacity
+  validation and insert.
+- SQLite uses BEGIN IMMEDIATE and API serialization around its single connection.
+- This prevents concurrent last-bed overselling in the supported local model.
+
+9.2 Server-side price snapshot
+------------------------------
+The browser does not send trusted totals.
+
+For requested quantity Q:
+- gross monthly rent = room rent per bed × Q.
+- discount amount = rounded gross rent × hostel discount percentage.
+- discounted monthly rent = gross rent − discount amount.
+- deposit = hostel deposit per bed × Q.
+- food charge = hostel monthly food charge per bed × Q.
+- service charge = hostel service charge per bed × Q.
+- tax = rounded percentage of discounted rent + food + service.
+- total initial payment = discounted rent + deposit + food + service + tax.
+
+These values are copied into the booking row so later listing price changes do
+not change the existing booking quote.
+
+The initial payment covers the first month and deposit/fees. The application
+does not automatically collect subsequent monthly rent.
+
+9.3 New flow-version-2 state transitions
+----------------------------------------
+
+Initial state:
+- pending_owner.
+- A 24-hour request deadline is stored in expires_at.
+- A booking event is written.
+- The owner is notified.
+
+pending_owner can transition to:
+- awaiting_payment when the correct owner approves.
+  - approved_at is stored.
+  - A fresh 24-hour payment deadline replaces expires_at.
+- rejected when the correct owner rejects with a reason of at least five
+  characters.
+  - No payment exists and refund is zero.
+- cancelled when the resident cancels before payment.
+  - Refund is zero.
+- derived expired when expires_at passes.
+
+awaiting_payment can transition to:
+- confirmed after a successful simulated payment.
+- cancelled when resident cancels before payment; refund zero.
+- derived expired when payment deadline passes.
+- It remains awaiting_payment after a failed simulated payment so retry is
+  possible while the window remains valid.
+
+confirmed can transition to:
+- completed when the owning owner marks it complete on or after move-out.
+- refund_pending when the resident cancels a paid booking.
+
+refund_pending can transition to:
+- refunded when an admin processes the supported demo refund.
+
+9.4 Legacy compatibility
+------------------------
+- Existing flow-version-1 bookings are intentionally preserved.
+- They retain their older payment-before-owner-approval transition.
+- The legacy POST /bookings/:id/pay route handles those records only.
+- Newly created bookings always use flow_version=2 and the approval-before-
+  payment flow described above.
+
+9.5 Booking actions and stale-decision protection
+-------------------------------------------------
+POST /bookings/:id/action accepts:
+- action: approve, reject, cancel, complete or refund.
+- optional reason.
+- optional expected_status.
+- optional expected_refund_amount.
+
+The UI fetches the latest booking detail before confirmation and sends expected
+status/refund preconditions. If state or amount changed, the API returns 409 and
+the transaction rolls back. Older clients may omit preconditions, but server
+authorization, state checks and calculated amounts still apply.
+
+9.6 Booking history
+-------------------
+- booking_events is append-only application history for implemented actions.
+- Events store booking ID, actor ID, actor name, actor role, event, resulting
+  status, optional note and timestamp.
+- Event insertion occurs in the same transaction as the corresponding booking
+  state or payment change.
+- Existing historical actions from before the table was introduced are not
+  fabricated.
+- Booking detail is visible only to that resident, the property owner or admin.
+
+
+10. PAYMENT AND REFUND ARCHITECTURE
+===================================
+
+10.1 Payment attempts
+---------------------
+Module: server/payments.js
+
+Only the booking resident can start an attempt.
+
+Input:
+- method: upi, card or netbanking.
+- outcome: success or failure.
+- idempotency_key: UUID.
+
+Rules:
+- Demo mode must be enabled.
+- Booking must currently be awaiting_payment.
+- Booking deadline must not have expired.
+- No final payment may already exist.
+- If a processing attempt already exists for the booking, it is returned.
+- Reusing the same idempotency key with the same request returns the earlier
+  attempt.
+- Reusing it for a different booking/user/method/outcome returns conflict.
+
+Created attempt:
+- status=processing.
+- amount copied from booking total.
+- ready_at is approximately 1.5 seconds after creation.
+- payment_started event is recorded.
+
+Completion:
+- Locks and reloads the attempt and booking.
+- Returns an already-final attempt unchanged.
+- Returns processing if ready_at has not arrived.
+- Becomes expired if the booking is no longer payable.
+- Becomes failed for selected failure outcome.
+- Becomes paid for selected success outcome.
+
+Successful completion:
+- Inserts exactly one payments row because booking_id is unique in payments.
+- kind=booking.
+- status=paid.
+- provider=demo.
+- method is stored.
+- A generated HH- reference is stored.
+- Version-2 booking becomes confirmed.
+- Payment event and resident/owner notifications are written.
+
+10.2 Role-scoped payment ledger
+-------------------------------
+- Resident sees payments with p.user_id=current user.
+- Owner sees booking payments for owned hostels and subscription payments paid
+  by that owner.
+- Admin sees all payments.
+
+10.3 Booking receipt
+--------------------
+- Generated dynamically as an HTML file.
+- Accessible only to booking resident, property owner or admin.
+- Includes reference, date, guest, property, room, bed quantity, stay dates,
+  payment method, rent, deposit, food, service, tax, discount, amount, payment
+  status and processed refund amount.
+- States that it is a demo payment and not a tax invoice.
+
+10.4 Cancellation and refunds
+------------------------------
+Unpaid pending/awaiting-payment cancellation:
+- No payment was received.
+- Refund amount is zero.
+- Reserved capacity is released.
+
+Paid cancellation before move-in:
+- Refund quote equals the full initial payment.
+
+Paid cancellation on or after move-in:
+- Refund quote equals the captured deposit.
+- Rent is retained.
+
+Admin refund:
+- Allowed only for refund_pending booking.
+- Allowed only when payment provider is demo.
+- Changes payment status to refunded and records refunded_at.
+- Changes booking status to refunded.
+- Does not contact a real financial provider.
+
+Dashboard/portfolio net collections subtract the booking’s processed
+refund_amount from paid amount for refunded rows.
+
+
+11. BASIC AND ADVANCED PLAN ARCHITECTURE
+========================================
+
+Authority file: server/plans.js
+
+Basic
+-----
+- Price: INR 0.
+- Maximum properties: 1.
+- Maximum photos per property: 8.
+- Search priority: 0.
+- Advanced analytics: false.
+- Booking report export: false.
+- Special offers/discount creation: false.
+
+Advanced
+--------
+- Simulated price: INR 999.
+- Maximum properties: 10.
+- Maximum photos per property: 200.
+- Search priority: 1.
+- Advanced analytics: true.
+- Booking report export: true.
+- Special offers/discount creation: true.
+
+Plan enforcement points
+-----------------------
+- Property creation quota.
+- Per-property photo additions.
+- Discount/special-offer creation or increase.
+- Recommended public-search priority.
+- Property-level portfolio analytics.
+- Owner booking CSV export.
+- Frontend control states and plan descriptions through /api/config.
+- CSV dataset validation.
+
+Advanced simulated checkout
+---------------------------
+- Owner starts subscription_attempt with method, selected success/failure outcome
+  and UUID idempotency key.
+- Status begins processing for about 1.5 seconds.
+- Failed completion leaves the account on Basic.
+- Successful completion:
+  - updates users.plan to Advanced,
+  - inserts a common payments ledger row with booking_id=NULL,
+  - kind=subscription,
+  - plan_code=Advanced,
+  - amount=999,
+  - status=paid,
+  - provider=demo,
+  - generated PLAN- reference,
+  - notification and audit entries.
+- Owner or admin can download a plain-text demo subscription receipt.
+
+Downgrade behavior
+------------------
+- POST /owner/subscription accepts Basic downgrade only.
+- Existing properties, photos, rooms, bookings and history are preserved.
+- Processing subscription attempts are cancelled.
+- Basic rules apply to future additions.
+- If an owner already has more than one property, those listings remain; the
+  owner cannot create another property while above the Basic maximum.
+- Existing photos above the Basic maximum may remain or be reduced, but new
+  photos cannot be added while still above the maximum.
+- An existing discount may remain or be reduced, but a Basic owner cannot create
+  or increase an offer.
+
+There is no automatic renewal, expiry period, recurring billing or real payment
+provider for plans.
+
+
+12. REVIEWS, MESSAGES, NOTIFICATIONS AND SUPPORT
+================================================
+
+Reviews
+-------
+- Only role=user can submit.
+- Booking must belong to the user.
+- Booking must be confirmed or completed.
+- Move-in date must have arrived.
+- One review per booking is enforced by a unique booking_id.
+- Rating range is 1 to 5.
+- New reviews are published immediately.
+- Admin can change status between published and hidden.
+- Public averages/details use published reviews only.
+
+Messages
+--------
+- Every message is connected to one hostel.
+- A non-owner can message the owner of an approved hostel.
+- An owner can reply only to a guest who previously messaged that owner about
+  that hostel.
+- The message list returns conversations in which the current user is sender or
+  recipient.
+- Sending a message creates a recipient notification.
+
+Notifications
+-------------
+- Stored in MySQL/SQLite, not pushed through email/SMS.
+- Scoped by user_id.
+- Read state is is_read.
+- Used for registration, booking requests, decisions, payments, listing review,
+  plan changes, messages and support resolution.
+- Frontend polls rather than using WebSockets.
+
+Complaints/support
+------------------
+- Signed-in users can create requests.
+- Optional booking_id is accepted only if that booking belongs to the requester.
+- Non-admins list only their own complaints.
+- Admin lists all complaints.
+- Admin resolution changes status to resolved, stores resolution text, notifies
+  the requester and writes an audit entry.
+
+Audit log
+---------
+- Stores actor_id, action, target_id, detail and timestamp.
+- Used for booking actions, plan events, listing decisions, user status changes,
+  review moderation and complaint resolution.
+- It is an application audit history, not an external observability service.
+
+
+13. DASHBOARD, PORTFOLIO AND REPORTING
+======================================
+
+GET /dashboard
+--------------
+Owner response is scoped to hostels owned by the signed-in owner.
+
+Admin response includes all hostels and also:
+- users without password/token fields,
+- reviews,
+- all payments,
+- recent audit rows,
+- recent subscription attempts,
+- Basic/Advanced owner counts,
+- simulated subscription revenue.
+
+Dashboard statistics include:
+- listing count,
+- booking count,
+- pending owner requests,
+- stays eligible for completion,
+- pending refunds and refund total,
+- net booking revenue,
+- pending listing count,
+- current occupied bed quantity.
+
+GET /portfolio
+--------------
+- Owner/admin only.
+- Optional hostel_id must be within the role’s visible property set.
+- Returns properties, stats, residents, arrivals, departures, requests,
+  awaiting-payment bookings, payments, recent reviews and recent messages.
+- Advanced owners and admins receive per-property performance.
+- Admin receives the ten latest seed-import records with parsed summaries.
+
+GET /reports/bookings.csv
+-------------------------
+- Admin always allowed.
+- Owner must have reportExports=true, which means Advanced.
+- Owner output is restricted to owned hostels.
+- Values are quoted.
+- Values beginning with spreadsheet-formula characters are prefixed to reduce
+  formula-injection risk.
+
+
+14. DATABASE ARCHITECTURE
+=========================
+
+14.1 Database adapter
+---------------------
+File: server/db.js
+
+MySQL:
+- mysql2/promise connection pool from DATABASE_URL.
+- Prepared execute calls with parameter arrays.
+- Transactions acquire a pool connection, begin, commit/rollback and release.
+- lock property is “ FOR UPDATE”.
+
+SQLite:
+- Node DatabaseSync.
+- WAL journal mode.
+- Foreign keys enabled.
+- Busy timeout 5,000 ms.
+- BEGIN IMMEDIATE transaction.
+- Writes are queued around the shared connection.
+
+The adapter exposes the same asynchronous interface for both engines.
+
+14.2 Tables and relationships
+-----------------------------
+
+users
+-----
+Purpose: authentication and all three roles.
+Important fields:
+- id primary key.
+- name.
+- email unique.
+- password bcrypt hash.
+- role: user, owner or admin.
+- phone, bio.
+- status: pending_verification, active, rejected or suspended. Existing seeded
+  accounts are active legacy/demo accounts.
+- plan: Basic or Advanced for owners; users use Basic value without plan
+  entitlements.
+- token_version for session revocation.
+- created_at.
+
+Relationship:
+- One owner user can own many hostels.
+- One resident user can own many bookings, payments, reviews, wishlist rows,
+  notifications and complaints.
+
+identity_verifications
+----------------------
+Purpose: one private account-identity review record per newly registered user or
+owner.
+Important fields:
+- user_id unique foreign key to users.
+- document_type.
+- original name, generated private path and MIME type.
+- status: pending, approved or rejected.
+- review_note.
+- reviewed_by nullable foreign key to the admin user.
+- reviewed_at, created_at and updated_at.
+
+The uploaded bytes live under uploads/private. Only an authenticated admin can
+download them through the protected identity-document endpoint.
+
+hostels
+--------
+Purpose: property listing and verification state.
+Important fields:
+- owner_id foreign key to users.
+- name, city, area, address, description.
+- gender.
+- facilities stored as a JSON string.
+- photos stored as an ordered JSON array string.
+- deposit, discount.
+- latitude, longitude.
+- nearby, check_in, check_out, contact, refund_policy.
+- status: draft, pending, approved or rejected.
+- verification_note.
+- min_stay_days, food_charge, service_charge, tax_percent.
+- created_at.
+
+rooms
+-----
+Purpose: room-type/bed inventory.
+Fields:
+- hostel_id foreign key.
+- name.
+- sharing from 1 to 4.
+- rent per bed per month.
+- capacity as total beds in that room type.
+- ac flag.
+
+documents
+---------
+Purpose: private verification-file metadata.
+Fields:
+- hostel_id foreign key.
+- owner_id.
+- original name.
+- generated private path.
+- MIME type.
+- created_at.
+
+bookings
+--------
+Purpose: booking quote and state.
+Relationships:
+- user_id foreign key to resident user.
+- hostel_id foreign key.
+- room_id foreign key.
+
+Important fields:
+- start_date, end_date.
+- status.
+- flow_version.
+- quantity.
+- monthly_rent/rent.
+- deposit.
+- food_charge, service_charge.
+- discount_amount, tax_amount.
+- total.
+- refund_amount.
+- min_stay_days snapshot.
+- guest_note.
+- approved_at.
+- expires_at.
+- created_at.
+
+payments
+--------
+Purpose: common successful booking/subscription ledger.
+Fields:
+- booking_id nullable for subscription payments and unique for booking payments.
+- user_id foreign key.
+- kind: booking or subscription.
+- amount.
+- status: paid or refunded for booking rows; paid for subscriptions.
+- provider=demo in the delivered workflow.
+- reference unique.
+- method.
+- plan_code for subscription rows.
+- refunded_at.
+- created_at.
+
+payment_attempts
+----------------
+Purpose: simulated booking checkout attempts including failures.
+Fields:
+- booking_id and user_id foreign keys.
+- idempotency_key unique.
+- method.
+- configured outcome.
+- status: processing, paid, failed or expired.
+- amount.
+- created_at, ready_at, completed_at.
+
+subscription_attempts
+---------------------
+Purpose: simulated Advanced-plan checkout attempts.
+Fields:
+- owner_id foreign key.
+- plan_code.
+- idempotency_key unique.
+- method, configured outcome and status.
+- amount and reference.
+- created_at, ready_at, completed_at.
+
+booking_events
+--------------
+Purpose: booking timeline.
+Fields:
+- booking_id foreign key.
+- actor_id foreign key.
+- actor_name and actor_role snapshots.
+- event, resulting status, note and created_at.
+
+reviews
+-------
+- user_id, hostel_id and booking_id foreign keys.
+- booking_id unique.
+- rating, body, moderation status and created_at.
+
+wishlist
+--------
+- Composite primary key user_id + hostel_id.
+- Both are foreign keys.
+
+notifications
+-------------
+- user_id foreign key.
+- title, body, is_read and created_at.
+
+messages
+--------
+- sender_id and recipient_id foreign keys to users.
+- hostel_id foreign key.
+- body and created_at.
+
+complaints
+----------
+- user_id foreign key.
+- optional booking_id foreign key.
+- subject, body, status, resolution and created_at.
+
+audit_log
+---------
+- actor_id, action, target_id, detail and created_at.
+- target_id is a generic application target identifier, not a declared foreign
+  key to one specific table.
+
+seed_records
+------------
+- Composite key entity + record_id.
+- Stores source_hash and applied_hash for safe repeat imports.
+
+seed_imports
+------------
+- Stores import source, success/failed status, JSON summary and created_at.
+
+14.3 Additive migrations
+------------------------
+File: server/migrations.js
+
+On every database initialization the migration function:
+- Detects columns through SHOW COLUMNS for MySQL or PRAGMA table_info for SQLite.
+- Adds missing hostel price/minimum-stay columns.
+- Adds missing booking flow, quantity, pricing, note and approval columns.
+- Adds payment method, refund timestamp and plan code.
+- Creates payment_attempts, seed_records, seed_imports and
+  subscription_attempts when missing.
+- Migrates any historical “Pro” plan value to Advanced without deleting history.
+
+This is a restart-safe additive helper, not a full versioned migration/rollback
+framework.
+
+
+15. CSV SEED DATA PIPELINE
+==========================
+
+Source files
+------------
+The editable seed-data directory contains:
+- owners.csv
+- guests.csv
+- hostels.csv
+- rooms.csv
+- hostel_photos.csv
+- hostel_amenities.csv
+- documents.csv
+- bookings.csv
+- payment_attempts.csv
+- payments.csv
+- subscription_payments.csv
+- booking_events.csv
+- reviews.csv
+- messages.csv
+- notifications.csv
+- complaints.csv
+- audit_log.csv
+- wishlist.csv
+- manifest.json
+
+The current manifest describes synthetic fictional data with:
+- 40 owners.
+- 60 residents.
+- 44 hostels.
+- 176 room types.
+- 132 photo associations.
+- 249 amenity associations.
+- 43 document metadata rows.
+- 480 bookings.
+- 541 booking payment attempts.
+- 376 booking payments.
+- 12 Advanced subscription payments.
+- 1,733 booking events.
+- 200 reviews.
+- 320 messages.
+- 1,000 notifications.
+- 40 complaints.
+- 688 audit rows.
+- 60 wishlist rows.
+
+These are seed-manifest counts, not a claim that the live database remains at
+exactly these counts after new registrations or other runtime activity.
+
+CSV parser
+----------
+File: server/csv.js
+
+- Implements RFC-4180-style quoted fields.
+- Handles commas, escaped quotes, CRLF, multiline values and UTF-8 BOM.
+- Rejects malformed quotes, wrong column counts and duplicate/missing headers.
+- stringifyCSV emits quoted UTF-8-with-BOM content.
+
+Validation
+----------
+File: server/seed-import.js
+
+Before import it verifies:
+- Manifest version, synthetic flag and reference date.
+- Exact documented columns for every file.
+- Numeric types and bounds.
+- Enum values.
+- Stable identifier syntax.
+- Required fields.
+- ISO timestamps and YYYY-MM-DD dates.
+- .test domain for synthetic accounts.
+- Coordinates, discounts, tax and minimum stay.
+- Room sharing, rent, capacity and AC values.
+- Review rating.
+- Bundled photo paths and generated sample document paths.
+- Foreign-key-style relationships across all CSVs.
+- Property belongs to an owner.
+- Room belongs to booking hostel.
+- Booking belongs to a resident.
+- Booking amounts reconcile.
+- Payment amount matches booking total.
+- Review eligibility.
+- Messages include the property owner.
+- Subscription payment belongs to an Advanced owner and is INR 999.
+- Account emails are unique.
+- Basic/Advanced property, photo and discount rules.
+- One final payment/review per booking in seed data.
+- Paid booking states have a payment; unpaid states do not.
+- Refund states match.
+- Overlapping seeded bookings do not exceed room capacity.
+
+Import behavior
+---------------
+- Import is disabled when NODE_ENV=production.
+- Seed dates are shifted relative to the first import anchor date.
+- Normalized hostel facilities and photos are assembled into JSON strings.
+- Subscription CSV rows are added to the common payments table with
+  booking_id=NULL and kind=subscription.
+- Seed passwords are bcrypt hashes of DEMO_SEED_PASSWORD or the documented local
+  default.
+- Fictional text declarations are generated in uploads/private when missing.
+- All database writes for a successful import occur in one transaction.
+- A successful or failed seed_imports row records the outcome.
+
+Live-edit preservation
+----------------------
+- Each imported row has source and applied hashes in seed_records.
+- If a managed row is unchanged in the application and source CSV changed, only
+  users, hostels, rooms and documents are eligible for update.
+- If the live row differs from the last applied hash, it is preserved.
+- Runtime/financial history is treated as immutable through repeat seed imports.
+- A room with active reservations is not overwritten.
+- Missing rows are inserted.
+- Repeat imports are therefore idempotent and avoid overwriting live changes.
+
+
+16. LOCAL SEARCH ASSISTANT AND MAPS
+===================================
+
+Local assistant
+---------------
+- Public POST /api/assistant.
+- Loads approved hostels belonging to active owners and each minimum room rent.
+- Parses simple budget phrases including “under 8k”.
+- Detects a fixed implemented city list: Chennai, Bengaluru, Hyderabad, Pune and
+  Coimbatore.
+- Detects boys/girls wording.
+- Detects food preference.
+- Returns up to three matching listings.
+- Has fixed explanations for booking/payment and cancellation/refund questions.
+- Response includes mode=local.
+
+Optional provider
+-----------------
+- Used only when AI_API_KEY is configured.
+- Sends a small local listing shortlist and the question to the configured
+  OpenAI-compatible chat-completions URL.
+- Uses a 12-second timeout.
+- System instruction says not to invent listing details or claim to book/pay.
+- On provider failure it silently retains the local response.
+- Response includes mode=ai only after a successful provider response.
+
+Maps
+----
+- Leaflet renders stored coordinates.
+- OpenStreetMap supplies external tiles.
+- Google Maps is an external link, not an embedded paid Maps API integration.
+
+
+17. BUILD, RUN AND DEPLOYMENT FILES
+===================================
+
+package.json
+------------
+- npm run dev: Express watch process plus Vite.
+- npm run build: TypeScript no-emit check plus Vite production build.
+- npm start: node server/index.js.
+- npm test: 27 tests, sequential.
+- npm run test:browser: Playwright browser QA.
+- npm run db:validate: validate CSV without database writes.
+- npm run db:seed: force reviewed seed import into configured database.
+- npm run db:fresh -- filename.sqlite: create a separate new SQLite dataset;
+  refuses to overwrite an existing file.
+- npm run db:generate: regenerate realistic seed CSVs.
+- npm run check: build then tests.
+
+Vite
+----
+- Development port 5173.
+- Proxies /api and /uploads to Express port 4000.
+- Production output is dist/.
+
+Windows launchers
+-----------------
+- Start-HostelHub.ps1 locates Node 24+, installs node_modules if absent, supports
+  a -Dev switch, builds if dist/index.html is absent, then starts server/index.js.
+- Start-HostelHub.cmd is a Windows command wrapper.
+
+Dockerfile
+----------
+- Multi-stage Node 24 build.
+- First stage installs all dependencies and builds frontend.
+- Runtime installs production dependencies, copies dist and server, uses a
+  non-root node user and exposes port 4000.
+- Runtime defaults NODE_ENV=production and DEMO_MODE=false.
+- Seed data is not copied into the final production stage.
+- This Docker image does not by itself enable demo workflows or real payments.
+
+compose.yaml
+------------
+- Defines a MySQL 8.4 service only.
+- Database name hostel_hub.
+- Restricted hostelhub application user from environment password.
+- Root password from environment.
+- Binds MySQL only to 127.0.0.1:3306.
+- Persists mysql_data volume.
+- Includes mysqladmin health check.
+
+
+18. AUTOMATED VERIFICATION IMPLEMENTED IN THE REPOSITORY
+=========================================================
+
+tests/booking-v2.test.js
+------------------------
+Covers:
+- Server-calculated first-month quote.
+- Owner approval before payment.
+- Processing/failure/retry/idempotency.
+- Rejection reason and capacity release.
+- Expired holds.
+- Concurrent multi-bed oversell prevention.
+- Minimum stay, sharing and quantity validation.
+- Cross-account booking/receipt/payment/portfolio privacy.
+- Cancellation during processing.
+- Stale status/refund preconditions.
+- Future paid cancellation refund.
+- Legacy flow compatibility.
+- Completed stay and unique review.
+
+tests/workflows.test.js
+-----------------------
+Covers:
+- Public search and unpublished hiding.
+- Authentication, registration and role protection.
+- Mutation request/Origin protection.
+- Reviews and moderation.
+- Wishlist and message isolation.
+- Private document verification and upload validation.
+- Independent owner listing and room operations.
+- Basic/Advanced limits, offers and downgrade preservation.
+- Subscription, complaints and CSV reports.
+- Session revocation.
+- Local assistant behavior.
+- SQLite persistence.
+
+tests/seed-import.test.js
+-------------------------
+Covers:
+- CSV quoting and malformed input.
+- Realistic dataset reconciliation and owner independence.
+- Repeat import, live-edit preservation, errors and rollback.
+
+Live audit scripts
+------------------
+- scripts/mysql-api-audit.mjs exercises live MySQL API workflows.
+- scripts/mysql-browser-audit.mjs exercises resident, independent owners, admin,
+  booking checkout, plan checkout, receipts, refund and responsive browser UI.
+- scripts/mysql-ui-surface-audit.mjs opens every public/role route and map/compare
+  surfaces while watching for JavaScript and server errors.
+- scripts/mysql-integrity-audit.mjs verifies uniqueness, hashes, roles, plans,
+  relationships, amounts, status values, InnoDB and foreign keys.
+- scripts/cleanup-mysql-audit.mjs removes generated QA accounts/data and uploaded
+  audit files without deleting the seeded dataset.
+
+Recorded final audit documentation reports:
+- 147 live MySQL API checks passed.
+- 38 full browser-journey checks passed.
+- 31 UI-surface checks passed.
+- 27 automated tests passed.
+- 26 MySQL integrity checks passed.
+
+These figures describe the documented verification run, not a continuously
+running monitoring system.
+
+
+19. COMPLETE END-TO-END USER FLOWS
+==================================
+
+19.1 Resident discovery and booking
+-----------------------------------
+1. Browser loads React SPA from Express or Vite.
+2. App requests config and optional current session.
+3. Explore requests GET /api/hostels with URL query filters.
+4. Express validates query parameters.
+5. API queries approved hostels owned by active accounts.
+6. API loads room inventory, calculates availability and published rating.
+7. API applies text, facility, room, rating, distance and plan-priority rules.
+8. React displays cards or Leaflet map.
+9. Resident opens detail and chooses room, quantity and dates.
+10. POST /api/bookings validates all inputs.
+11. Transaction locks the room in MySQL, rechecks capacity and calculates price.
+12. Booking and initial timeline event are inserted.
+13. Owner receives stored notification.
+14. Resident sees pending_owner.
+15. Owner approves; booking becomes awaiting_payment with fresh deadline.
+16. Resident opens Checkout.
+17. Payment-attempt endpoint creates processing attempt with UUID idempotency.
+18. Completion simulates failure or success.
+19. Failure is stored as an attempt and can be retried.
+20. Success inserts final payment and changes booking to confirmed.
+21. Resident and owner receive notifications.
+22. Resident downloads server-generated HTML receipt.
+
+19.2 Cancellation and refund
+----------------------------
+1. Resident opens current booking detail.
+2. Server returns current cancellation quote and allowed cancel action.
+3. UI shows refund amount and explanation.
+4. UI posts cancel with expected state and expected amount.
+5. Transaction rechecks both values.
+6. Unpaid booking becomes cancelled with zero refund.
+7. Paid booking becomes refund_pending with full-payment or deposit refund based
+   on the current date.
+8. Admin opens refund queue.
+9. Admin posts refund action.
+10. Backend verifies demo provider and pending state.
+11. Payment becomes refunded, booking becomes refunded, events/audit and
+    notifications are stored.
+
+19.3 Account identity verification
+----------------------------------
+1. Applicant chooses resident or owner and enters name, email and password.
+2. Applicant selects an identity type, confirms consent and uploads a fictional
+   JPEG, PNG or PDF document no larger than 5 MB.
+3. Backend validates fields, file signature and size.
+4. Backend hashes the password, writes the private file under a generated name,
+   and transactionally creates the pending account and verification record.
+5. Active admins receive a notification; the applicant receives no session.
+6. Pending login is blocked with an awaiting-approval message.
+7. Admin opens Account verification, downloads the document through the
+   role-protected endpoint and enters a required review note.
+8. Approval changes the account to active, stores reviewer/time, notifies the
+   applicant and writes an audit event. The applicant can then sign in.
+9. Rejection changes the account to rejected and exposes the reason at login.
+10. The applicant submits the same email/password with a replacement document.
+11. Backend locks the records, deletes the superseded private file after commit,
+    clears the prior decision and returns the account to pending_verification.
+
+19.4 Owner listing verification
+-------------------------------
+1. Owner registers or signs in.
+2. Owner creates listing and first room; backend checks plan quota.
+3. Listing is stored as draft.
+4. Owner uploads generated-name public image.
+5. Owner uploads private PDF/image verification document.
+6. Owner submits listing.
+7. Backend requires a photo and document and marks pending.
+8. Admin receives notification.
+9. Admin dashboard loads listing and document metadata.
+10. Admin downloads document through protected API.
+11. Admin approves or rejects with note.
+12. Backend changes status, notifies owner and writes audit entry.
+13. Approved listing appears in public search.
+14. Later material edit returns it to draft.
+
+19.5 Advanced plan activation
+-----------------------------
+1. Basic owner opens /owner/plans.
+2. Frontend receives both plan definitions from /api/config.
+3. Owner chooses Advanced and a simulated method/outcome.
+4. API creates processing subscription_attempt with UUID idempotency.
+5. Frontend waits and calls completion.
+6. Failure stores failed attempt; Basic remains unchanged.
+7. Retry uses a new UUID.
+8. Success changes users.plan to Advanced and creates subscription payment.
+9. Notification and audit entry are created.
+10. Frontend refreshes session user and unlocks Advanced controls.
+11. Owner can download text receipt.
+
+19.6 CSV to MySQL
+-----------------
+1. Administrator/developer edits synthetic CSV files.
+2. npm run db:validate parses every file and validates full relationships without
+   opening/writing a database.
+3. npm run db:seed connects to the configured database.
+4. Data is reparsed and revalidated.
+5. Dates are rebased to the preserved anchor.
+6. Rows are normalized for database tables.
+7. Source/applied hashes are compared.
+8. New rows are inserted.
+9. Eligible unchanged managed records can receive source updates.
+10. Live edits and financial history are preserved.
+11. All accepted writes commit in one transaction.
+12. Import summary is stored and visible to admin portfolio.
+
+
+20. SOURCE FILE RESPONSIBILITY MAP
+==================================
+
+Frontend
+--------
+- src/main.tsx
+  Application context, initial session/config loading, router, header, footer,
+  notification badge and assistant.
+- src/api.ts
+  Frontend data types, fetch wrapper, money/date helpers.
+- src/shared.tsx
+  Shared components and hooks.
+- src/homes.tsx
+  Explore, listing cards, detail, map, compare and booking request form.
+- src/account.tsx
+  Authentication, profile, notifications, messages and support.
+- src/bookings.tsx
+  Booking workspaces, timeline, decisions, cancellation/refund and review UI.
+- src/checkout.tsx
+  Booking payment simulation.
+- src/portfolio.tsx
+  Portfolio analytics and payment ledger.
+- src/management.tsx
+  Owner/admin/property/room/document/plan interfaces.
+- src/styles.css
+  Full responsive visual system.
+
+Backend
+-------
+- server/index.js
+  Runtime entry point.
+- server/app.js
+  Main Express middleware and most APIs.
+- server/db.js
+  MySQL/SQLite adapter and initial schema.
+- server/migrations.js
+  Additive schema changes.
+- server/booking-workflow.js
+  Derived booking status, permissions, refund quote, rows and events.
+- server/payments.js
+  Payment attempts, completion, ledgers and booking receipts.
+- server/portfolio.js
+  Owner/admin operational analytics.
+- server/plans.js
+  Basic/Advanced catalogue.
+- server/csv.js
+  CSV parser/stringifier.
+- server/seed-import.js
+  Load, validate and safely import synthetic CSV data.
+- server/seed.js
+  Demo bootstrap and import trigger.
+- server/create-admin.js
+  Controlled admin bootstrap from private environment values.
+- server/seed-legacy.js
+  Older seed implementation retained in the repository; current startup imports
+  through server/seed.js and server/seed-import.js.
+
+Data/configuration
+------------------
+- seed-data/*.csv and manifest.json
+  Editable synthetic source dataset.
+- .env.example
+  Safe configuration template; actual .env is private and ignored.
+- package.json
+  Dependencies and scripts.
+- vite.config.ts
+  Development proxy and build output.
+- tsconfig.json
+  Strict TypeScript settings.
+- Dockerfile and compose.yaml
+  Container build and MySQL service starting points.
+- Start-HostelHub.ps1 and Start-HostelHub.cmd
+  Windows launchers.
+
+Testing/audit
+-------------
+- tests/booking-v2.test.js
+- tests/workflows.test.js
+- tests/seed-import.test.js
+- scripts/browser-qa.mjs
+- scripts/mysql-api-audit.mjs
+- scripts/mysql-browser-audit.mjs
+- scripts/mysql-ui-surface-audit.mjs
+- scripts/mysql-integrity-audit.mjs
+- scripts/cleanup-mysql-audit.mjs
+
+
+21. EXPLICITLY NOT IMPLEMENTED
+==============================
+
+Do not draw any of the following as active production components:
+
+- No live Razorpay or other payment gateway.
+- No real card processing, UPI transfer or net-banking connection.
+- No payment-provider webhooks or provider reconciliation.
+- No automatic recurring plan billing.
+- No subscription expiry or billing periods.
+- No automatic monthly hostel-rent collection after the first payment.
+- No email delivery service.
+- No SMS or WhatsApp delivery.
+- No WebSocket or push-notification server.
+- No Redis cache, Redis session store or distributed rate limiter.
+- No message queue, event bus, Kafka or RabbitMQ.
+- No microservices; this is one Express application.
+- No separate owner authentication table; all roles use users.
+- No cloud object storage; uploads use local disk.
+- No malware scanning service for uploads.
+- No paid Google Maps API integration.
+- No guaranteed external search-engine visibility.
+- No verified real businesses; seed listings and documents are fictional.
+- No deployed production monitoring/telemetry platform.
+- No horizontal scaling mechanism.
+- No full versioned migration/rollback framework.
+- No pagination for the small local list/report APIs.
+- No mandatory hosted AI service; the default assistant is local search.
+
+
+22. INSTRUCTIONS FOR GENERATING THE ARCHITECTURE DIAGRAM
+========================================================
+
+Create a full end-to-end diagram using only this document.
+
+The main architecture diagram should show these implemented layers:
+
+1. Actors
+   - Resident/User.
+   - Hostel Owner.
+   - Administrator.
+
+2. Browser frontend
+   - React Router/Application Context.
+   - Public discovery/map/compare.
+   - Account/messages/support.
+   - Booking/checkout/payment ledger.
+   - Owner property/room/document/plan management.
+   - Admin verification/moderation/refund/dashboard.
+   - Shared API client.
+
+3. Express backend
+   - Helmet/CSP.
+   - JSON/cookie parsing.
+   - mutation Origin/custom-header protection.
+   - rate limiting.
+   - JWT session restoration.
+   - role/ownership authorization.
+   - Zod validation.
+   - route groups.
+
+4. Business modules
+   - Booking workflow and capacity calculation.
+   - Payment-attempt simulator.
+   - Basic/Advanced plan catalogue.
+   - Portfolio aggregation.
+   - Notifications/audit.
+   - CSV import/validation.
+
+5. Persistence
+   - Database adapter.
+   - Active MySQL runtime.
+   - Optional SQLite/test path.
+   - Table groups and primary relationships.
+   - Public uploads and private documents.
+
+6. External/optional connections
+   - OpenStreetMap tiles.
+   - Google Maps external link.
+   - Optional OpenAI-compatible provider with local fallback.
+
+7. Build/test/operations
+   - Vite build to dist.
+   - Express static serving.
+   - Node/Supertest tests.
+   - Playwright browser tests.
+   - MySQL audit scripts.
+   - Dockerfile and optional Compose MySQL.
+
+Use solid arrows for active runtime calls and dotted arrows for optional external
+AI. Label payment and subscription components “SIMULATED — NO REAL MONEY”. Show
+local disk for uploads. Show MySQL as the current configured runtime database and
+SQLite as an implemented alternative/test database, not as two databases written
+simultaneously.
+
+If adding a booking state diagram, use the flow-version-2 states:
+
+pending_owner
+  -> awaiting_payment on owner approval
+  -> rejected on owner rejection
+  -> cancelled on resident unpaid cancellation
+  -> derived expired after deadline
+
+awaiting_payment
+  -> confirmed on simulated payment success
+  -> remains retryable after simulated payment failure
+  -> cancelled on unpaid cancellation
+  -> derived expired after deadline
+
+confirmed
+  -> completed after move-out by owner
+  -> refund_pending on paid cancellation
+
+refund_pending
+  -> refunded by admin demo refund
+
+Mention the legacy flow-version-1 branch only as a compatibility note, not as the
+main state machine.
+
+If adding an entity relationship diagram, include:
+- users owns hostels.
+- hostels contains rooms and documents.
+- users, hostels and rooms connect to bookings.
+- bookings connect to booking_events, payment_attempts, one final booking payment,
+  optional review and optional complaints.
+- users and hostels connect through wishlist and messages.
+- users receive notifications.
+- owners have subscription_attempts and subscription payments in the common
+  payments ledger.
+- seed_records and seed_imports support the import pipeline.
+
+Do not invent services, tables, queues, providers, endpoints or deployment
+components beyond those explicitly listed here.

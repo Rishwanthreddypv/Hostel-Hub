@@ -8,7 +8,8 @@ import { migrate } from "./migrations.js";
 export async function createDatabase(options = {}) {
   // An explicit file path always represents an isolated SQLite database. This
   // keeps tests and one-off tools from inheriting DB_CLIENT=mysql from .env.
-  const client = options.client || (options.path ? "sqlite" : process.env.DB_CLIENT);
+  const client =
+    options.client || (options.path ? "sqlite" : process.env.DB_CLIENT);
   const isMysql = client === "mysql";
   let native;
   if (isMysql) native = mysql.createPool(process.env.DATABASE_URL);
@@ -78,6 +79,7 @@ export async function createDatabase(options = {}) {
   // Initial idempotent schema. Add reviewed migrations before evolving existing databases.
   const tables = [
     `users (id VARCHAR(36) PRIMARY KEY,name VARCHAR(120) NOT NULL,email VARCHAR(190) NOT NULL UNIQUE,password VARCHAR(255) NOT NULL,role VARCHAR(20) NOT NULL,phone VARCHAR(30) NOT NULL DEFAULT '',bio TEXT NOT NULL,status VARCHAR(20) NOT NULL DEFAULT 'active',plan VARCHAR(20) NOT NULL DEFAULT 'Basic',token_version INTEGER NOT NULL DEFAULT 0,created_at VARCHAR(30) NOT NULL)`,
+    `identity_verifications (id VARCHAR(36) PRIMARY KEY,user_id VARCHAR(36) NOT NULL UNIQUE,document_type VARCHAR(40) NOT NULL,name VARCHAR(255) NOT NULL,path VARCHAR(255) NOT NULL,mime VARCHAR(80) NOT NULL,status VARCHAR(30) NOT NULL,review_note TEXT NOT NULL,reviewed_by VARCHAR(36),reviewed_at VARCHAR(30) NOT NULL DEFAULT '',created_at VARCHAR(30) NOT NULL,updated_at VARCHAR(30) NOT NULL,FOREIGN KEY(user_id) REFERENCES users(id),FOREIGN KEY(reviewed_by) REFERENCES users(id))`,
     `hostels (id VARCHAR(36) PRIMARY KEY,owner_id VARCHAR(36) NOT NULL,name VARCHAR(160) NOT NULL,city VARCHAR(80) NOT NULL,area VARCHAR(100) NOT NULL,address TEXT NOT NULL,description TEXT NOT NULL,gender VARCHAR(20) NOT NULL,facilities TEXT NOT NULL,photos TEXT NOT NULL,deposit INTEGER NOT NULL,discount INTEGER NOT NULL DEFAULT 0,latitude DOUBLE NOT NULL,longitude DOUBLE NOT NULL,nearby TEXT NOT NULL,check_in VARCHAR(20) NOT NULL,check_out VARCHAR(20) NOT NULL,contact VARCHAR(30) NOT NULL,refund_policy TEXT NOT NULL,status VARCHAR(20) NOT NULL,verification_note TEXT NOT NULL,created_at VARCHAR(30) NOT NULL,FOREIGN KEY(owner_id) REFERENCES users(id))`,
     `rooms (id VARCHAR(36) PRIMARY KEY,hostel_id VARCHAR(36) NOT NULL,name VARCHAR(80) NOT NULL,sharing INTEGER NOT NULL,rent INTEGER NOT NULL,capacity INTEGER NOT NULL,ac INTEGER NOT NULL DEFAULT 0,FOREIGN KEY(hostel_id) REFERENCES hostels(id))`,
     `documents (id VARCHAR(36) PRIMARY KEY,hostel_id VARCHAR(36) NOT NULL,owner_id VARCHAR(36) NOT NULL,name VARCHAR(255) NOT NULL,path VARCHAR(255) NOT NULL,mime VARCHAR(80) NOT NULL,created_at VARCHAR(30) NOT NULL,FOREIGN KEY(hostel_id) REFERENCES hostels(id))`,

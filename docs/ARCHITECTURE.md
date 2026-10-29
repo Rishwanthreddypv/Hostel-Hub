@@ -28,6 +28,8 @@ Express serves the built SPA and API together on port 4000. In development, Vite
 ```mermaid
 erDiagram
   USERS ||--o{ HOSTELS : owns
+  USERS ||--o| IDENTITY_VERIFICATIONS : submits
+  USERS ||--o{ IDENTITY_VERIFICATIONS : reviews
   HOSTELS ||--|{ ROOMS : offers
   USERS ||--o{ BOOKINGS : reserves
   HOSTELS ||--o{ BOOKINGS : receives
@@ -90,6 +92,20 @@ Booking events are appended in the same transaction as the state change, payment
 ## Verification states
 
 ```mermaid
+stateDiagram-v2
+  [*] --> pending_verification: register + private identity upload
+  pending_verification --> active: admin approves
+  pending_verification --> rejected: admin rejects with reason
+  rejected --> pending_verification: applicant replaces document
+  active --> suspended: admin suspends
+  suspended --> active: admin reactivates
+```
+
+New self-registered residents and owners are stored as pending and receive no session. Identity files are limited to 5 MB JPEG, PNG or PDF content, use generated private names and are available only through an admin-authorized endpoint. Approval/rejection records the reviewer, time, required note, notification and audit entry. Existing seeded accounts are active legacy/demo records.
+
+Hostel listing verification is separate:
+
+```mermaid
 flowchart LR
   R[Owner registration] --> D[Draft listing]
   D --> U[Photos + ownership documents]
@@ -101,7 +117,7 @@ flowchart LR
   D2 --> P
 ```
 
-Uploads enforce an 8 MB size limit and supported file signatures. Private documents never use the public static-file route. Only the document owner and admins may download them. Approval requires a pending listing with documents. Room capacity changes cannot reduce capacity below existing reservations’ peak demand.
+Listing uploads enforce an 8 MB size limit and supported file signatures. Private documents never use the public static-file route. Listing documents are available to their owner and admins; account identity documents are admin-only. Listing approval requires a pending listing with documents. Room capacity changes cannot reduce capacity below existing reservations’ peak demand.
 
 ## Security boundaries
 

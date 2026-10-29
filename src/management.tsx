@@ -560,7 +560,8 @@ function ListingEditor({
           />
         </Field>
         <p className="muted">
-          {h.photos.length} of {maxPhotos} photos used on your {user?.plan} plan.
+          {h.photos.length} of {maxPhotos} photos used on your {user?.plan}{" "}
+          plan.
         </p>
         {!h.id && (
           <>
@@ -738,7 +739,11 @@ function PaymentTable({ payments }: { payments: any[] }) {
               <td>
                 <code>{p.reference.slice(0, 18)}</code>
               </td>
-              <td>{p.kind === "subscription" ? `${p.plan_code || "Advanced"} plan` : p.kind}</td>
+              <td>
+                {p.kind === "subscription"
+                  ? `${p.plan_code || "Advanced"} plan`
+                  : p.kind}
+              </td>
               <td>{money(p.amount)}</td>
               <td>
                 <Badge status={p.status}>{p.status}</Badge>
@@ -761,6 +766,7 @@ export function Admin() {
   const { data, error, load } = useLoad("/dashboard");
   const [tab, setTab] = useState("listings"),
     [review, setReview] = useState<any>(null),
+    [identityReview, setIdentityReview] = useState<any>(null),
     [note, setNote] = useState(""),
     [busy, setBusy] = useState(false);
   const act = async (path: string, body: any) => {
@@ -793,9 +799,21 @@ export function Admin() {
             <Portfolio property={property} onProperty={setProperty} />
             <WorkQueues stats={data.stats} />
             <div className="stats-grid">
-              <div className="stat"><span>Basic owners</span><strong>{data.stats.basic_owners}</strong><small>Free plan</small></div>
-              <div className="stat"><span>Advanced owners</span><strong>{data.stats.advanced_owners}</strong><small>Priority plan</small></div>
-              <div className="stat"><span>Subscription revenue</span><strong>{money(data.stats.subscription_revenue)}</strong><small>Simulated successful payments</small></div>
+              <div className="stat">
+                <span>Basic owners</span>
+                <strong>{data.stats.basic_owners}</strong>
+                <small>Free plan</small>
+              </div>
+              <div className="stat">
+                <span>Advanced owners</span>
+                <strong>{data.stats.advanced_owners}</strong>
+                <small>Priority plan</small>
+              </div>
+              <div className="stat">
+                <span>Subscription revenue</span>
+                <strong>{money(data.stats.subscription_revenue)}</strong>
+                <small>Simulated successful payments</small>
+              </div>
             </div>
             <div className="dashboard-shortcuts">
               <Link to="/bookings">
@@ -815,20 +833,79 @@ export function Admin() {
               </Link>
             </div>
             <div className="tabs">
-              {["listings", "users", "reviews", "payments", "audit"].map(
-                (t) => (
-                  <button
-                    key={t}
-                    className={tab === t ? "active" : ""}
-                    onClick={() => setTab(t)}
-                  >
-                    {t === "listings"
+              {[
+                "verifications",
+                "listings",
+                "users",
+                "reviews",
+                "payments",
+                "audit",
+              ].map((t) => (
+                <button
+                  key={t}
+                  className={tab === t ? "active" : ""}
+                  onClick={() => setTab(t)}
+                >
+                  {t === "verifications"
+                    ? `Account verification (${data.stats.pending_accounts} pending)`
+                    : t === "listings"
                       ? `Listings (${data.stats.pending} pending)`
                       : t[0].toUpperCase() + t.slice(1)}
-                  </button>
-                ),
-              )}
+                </button>
+              ))}
             </div>
+            {tab === "verifications" && (
+              <div className="panel">
+                {data.identity_verifications?.length ? (
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Applicant</th>
+                          <th>Role</th>
+                          <th>Document</th>
+                          <th>Status</th>
+                          <th>Submitted</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.identity_verifications.map((v: any) => (
+                          <tr key={v.id}>
+                            <td>
+                              <b>{v.user_name}</b>
+                              <small>{v.user_email}</small>
+                            </td>
+                            <td>{v.user_role}</td>
+                            <td>{v.document_type.replaceAll("_", " ")}</td>
+                            <td>
+                              <Badge status={v.status}>{v.status}</Badge>
+                            </td>
+                            <td>{dateLabel(v.updated_at)}</td>
+                            <td>
+                              <button
+                                className="text-button"
+                                onClick={() => {
+                                  setNote(v.review_note || "");
+                                  setIdentityReview(v);
+                                }}
+                              >
+                                {v.status === "pending" ? "Review" : "View"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <Empty
+                    title="No account verifications"
+                    body="New user and owner registrations will appear here."
+                  />
+                )}
+              </div>
+            )}
             {tab === "listings" && (
               <div className="owner-listings">
                 {data.hostels.map((h: Hostel) => (
@@ -890,21 +967,24 @@ export function Admin() {
                           <Badge status={u.status}>{u.status}</Badge>
                         </td>
                         <td>
-                          {u.role !== "admin" && (
-                            <button
-                              className="text-button"
-                              onClick={() =>
-                                act("/admin/users/" + u.id + "/status", {
-                                  status:
-                                    u.status === "active"
-                                      ? "suspended"
-                                      : "active",
-                                })
-                              }
-                            >
-                              {u.status === "active" ? "Suspend" : "Reactivate"}
-                            </button>
-                          )}
+                          {u.role !== "admin" &&
+                            ["active", "suspended"].includes(u.status) && (
+                              <button
+                                className="text-button"
+                                onClick={() =>
+                                  act("/admin/users/" + u.id + "/status", {
+                                    status:
+                                      u.status === "active"
+                                        ? "suspended"
+                                        : "active",
+                                  })
+                                }
+                              >
+                                {u.status === "active"
+                                  ? "Suspend"
+                                  : "Reactivate"}
+                              </button>
+                            )}
                         </td>
                       </tr>
                     ))}
@@ -953,18 +1033,42 @@ export function Admin() {
                 {data.subscription_attempts.length ? (
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>Owner</th><th>Plan</th><th>Method</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
-                      <tbody>{data.subscription_attempts.map((attempt: any) => (
-                        <tr key={attempt.id}>
-                          <td>{attempt.owner_name}<small>{attempt.owner_email}</small></td>
-                          <td>{attempt.plan_code}</td><td>{attempt.method.toUpperCase()}</td>
-                          <td>{money(attempt.amount)}</td><td><Badge status={attempt.status}>{attempt.status}</Badge></td>
-                          <td>{dateLabel(attempt.created_at)}</td>
+                      <thead>
+                        <tr>
+                          <th>Owner</th>
+                          <th>Plan</th>
+                          <th>Method</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                          <th>Date</th>
                         </tr>
-                      ))}</tbody>
+                      </thead>
+                      <tbody>
+                        {data.subscription_attempts.map((attempt: any) => (
+                          <tr key={attempt.id}>
+                            <td>
+                              {attempt.owner_name}
+                              <small>{attempt.owner_email}</small>
+                            </td>
+                            <td>{attempt.plan_code}</td>
+                            <td>{attempt.method.toUpperCase()}</td>
+                            <td>{money(attempt.amount)}</td>
+                            <td>
+                              <Badge status={attempt.status}>
+                                {attempt.status}
+                              </Badge>
+                            </td>
+                            <td>{dateLabel(attempt.created_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
                     </table>
                   </div>
-                ) : <p className="muted">No interactive subscription attempts yet.</p>}
+                ) : (
+                  <p className="muted">
+                    No interactive subscription attempts yet.
+                  </p>
+                )}
               </div>
             )}
             {tab === "audit" && (
@@ -994,6 +1098,95 @@ export function Admin() {
             )}
           </>
         )
+      )}
+      {identityReview && (
+        <Modal
+          title={"Verify " + identityReview.user_name}
+          onClose={() => setIdentityReview(null)}
+        >
+          <p>
+            Confirm that the document is clear, belongs to the applicant, and
+            matches the account name. Never copy identity numbers into notes.
+          </p>
+          <div className="verification-summary">
+            <div>
+              <small>Applicant</small>
+              <b>{identityReview.user_name}</b>
+              <span>{identityReview.user_email}</span>
+            </div>
+            <div>
+              <small>Account type</small>
+              <b>{identityReview.user_role}</b>
+            </div>
+            <div>
+              <small>Document type</small>
+              <b>{identityReview.document_type.replaceAll("_", " ")}</b>
+            </div>
+          </div>
+          <a
+            className="document-link"
+            href={`/api/identity-verifications/${identityReview.id}/document`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <FileCheck size={20} />
+            Open private identity document
+            <Download size={16} />
+          </a>
+          {identityReview.status !== "pending" ? (
+            <div className="info-box">
+              <b>Decision: {identityReview.status}</b>
+              <p>{identityReview.review_note}</p>
+              {identityReview.reviewer_name && (
+                <small>Reviewed by {identityReview.reviewer_name}</small>
+              )}
+            </div>
+          ) : (
+            <>
+              <Field label="Review note (required; do not enter ID numbers)">
+                <textarea
+                  value={note}
+                  maxLength={1000}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Record what was checked or explain what must be replaced."
+                />
+              </Field>
+              <div className="dialog-actions">
+                {(["rejected", "approved"] as const).map((status) => (
+                  <button
+                    key={status}
+                    disabled={busy || !note.trim()}
+                    className={
+                      "button " + (status === "rejected" ? "secondary" : "")
+                    }
+                    onClick={async () => {
+                      setBusy(true);
+                      try {
+                        await api(
+                          `/admin/identity-verifications/${identityReview.id}/review`,
+                          "POST",
+                          { status, note },
+                        );
+                        setIdentityReview(null);
+                        setNote("");
+                        await load();
+                        toast(`Account ${status}.`);
+                      } catch (e) {
+                        toast((e as Error).message);
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    {status === "approved"
+                      ? "Approve account"
+                      : "Reject and request replacement"}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </Modal>
       )}
       {review && (
         <Modal title={"Verify " + review.name} onClose={() => setReview(null)}>
@@ -1124,18 +1317,33 @@ function SubscriptionCheckout({ onClose }: { onClose: () => void }) {
     }
   }
   return (
-    <Modal title={paid ? "Advanced is active" : "Activate Advanced"} onClose={processing ? () => {} : onClose}>
+    <Modal
+      title={paid ? "Advanced is active" : "Activate Advanced"}
+      onClose={processing ? () => {} : onClose}
+    >
       <div className="checkout-trust">
-        <ShieldCheck size={17} /> Demo subscription payment — no money transferred
+        <ShieldCheck size={17} /> Demo subscription payment — no money
+        transferred
       </div>
       {paid ? (
         <div className="payment-result success">
           <CheckCircle2 size={52} />
           <h3>Your Advanced plan is active</h3>
-          <p>Priority discovery, expanded limits and advanced reports are ready.</p>
+          <p>
+            Priority discovery, expanded limits and advanced reports are ready.
+          </p>
           <strong>{money(999)}</strong>
-          {payment && <a className="button secondary" href={`/api/subscription-payments/${payment.id}/receipt`}><Download size={17} /> Download receipt</a>}
-          <button className="button" onClick={onClose}>Return to plans</button>
+          {payment && (
+            <a
+              className="button secondary"
+              href={`/api/subscription-payments/${payment.id}/receipt`}
+            >
+              <Download size={17} /> Download receipt
+            </a>
+          )}
+          <button className="button" onClick={onClose}>
+            Return to plans
+          </button>
         </div>
       ) : processing ? (
         <div className="payment-result" role="status">
@@ -1146,26 +1354,73 @@ function SubscriptionCheckout({ onClose }: { onClose: () => void }) {
       ) : (
         <>
           <div className="receipt-lines">
-            <div><span>Advanced plan</span><b>{money(999)}</b></div>
-            <div className="payment-grand-total"><span>Amount due now</span><strong>{money(999)}</strong></div>
+            <div>
+              <span>Advanced plan</span>
+              <b>{money(999)}</b>
+            </div>
+            <div className="payment-grand-total">
+              <span>Amount due now</span>
+              <strong>{money(999)}</strong>
+            </div>
           </div>
-          <div className="payment-methods" aria-label="Subscription payment method">
-            {[["upi", "UPI", Smartphone], ["card", "Card", CreditCard], ["netbanking", "Net banking", Landmark]].map(([value, label, Icon]: any) => (
-              <button key={value} aria-pressed={method === value} className={method === value ? "selected" : ""} onClick={() => { setMethod(value); setKey(crypto.randomUUID()); }}><Icon size={20} /> {label}</button>
+          <div
+            className="payment-methods"
+            aria-label="Subscription payment method"
+          >
+            {[
+              ["upi", "UPI", Smartphone],
+              ["card", "Card", CreditCard],
+              ["netbanking", "Net banking", Landmark],
+            ].map(([value, label, Icon]: any) => (
+              <button
+                key={value}
+                aria-pressed={method === value}
+                className={method === value ? "selected" : ""}
+                onClick={() => {
+                  setMethod(value);
+                  setKey(crypto.randomUUID());
+                }}
+              >
+                <Icon size={20} /> {label}
+              </button>
             ))}
           </div>
           <Field label="Demo bank response">
-            <select value={outcome} onChange={(e) => { setOutcome(e.target.value); setKey(crypto.randomUUID()); }}>
+            <select
+              value={outcome}
+              onChange={(e) => {
+                setOutcome(e.target.value);
+                setKey(crypto.randomUUID());
+              }}
+            >
               <option value="success">Approve payment</option>
               <option value="failure">Decline payment to test retry</option>
             </select>
           </Field>
-          {attempt?.status === "failed" && <div className="error-box">Payment declined. Your Basic plan is unchanged. You can retry.</div>}
+          {attempt?.status === "failed" && (
+            <div className="error-box">
+              Payment declined. Your Basic plan is unchanged. You can retry.
+            </div>
+          )}
           <label className="payment-consent">
-            <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-            <span>I understand this is a simulated ₹999 payment with no automatic renewal.</span>
+            <input
+              type="checkbox"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+            />
+            <span>
+              I understand this is a simulated ₹999 payment with no automatic
+              renewal.
+            </span>
           </label>
-          <button className="button full" disabled={busy || !consent} onClick={begin}>{busy ? "Connecting…" : `Pay ${money(999)}`} <ShieldCheck size={18} /></button>
+          <button
+            className="button full"
+            disabled={busy || !consent}
+            onClick={begin}
+          >
+            {busy ? "Connecting…" : `Pay ${money(999)}`}{" "}
+            <ShieldCheck size={18} />
+          </button>
           <ErrorBox error={error} />
         </>
       )}
@@ -1179,46 +1434,110 @@ export function Plans() {
   const [selected, setSelected] = useState("");
   const [busy, setBusy] = useState(false);
   const propertyCount = listings.data?.hostels.length || 0;
-  const photoCount = (listings.data?.hostels || []).reduce((total: number, hostel: any) => total + hostel.photos.length, 0);
+  const photoCount = (listings.data?.hostels || []).reduce(
+    (total: number, hostel: any) => total + hostel.photos.length,
+    0,
+  );
   const features: any = {
-    Basic: ["Manage 1 property", "Upload up to 8 photos per property", "Booking, room and availability management", "Messages, notifications and portfolio totals", "Standard search placement"],
-    Advanced: ["Manage up to 10 properties", "Upload up to 200 photos per property", "Priority placement in search results", "Property-level revenue and occupancy analytics", "Booking CSV reports, discounts and special offers"],
+    Basic: [
+      "Manage 1 property",
+      "Upload up to 8 photos per property",
+      "Booking, room and availability management",
+      "Messages, notifications and portfolio totals",
+      "Standard search placement",
+    ],
+    Advanced: [
+      "Manage up to 10 properties",
+      "Upload up to 200 photos per property",
+      "Priority placement in search results",
+      "Property-level revenue and occupancy analytics",
+      "Booking CSV reports, discounts and special offers",
+    ],
   };
   return (
     <div className="page">
-      <PageTitle eyebrow="ROOM TO GROW" title="Two clear plans. One complete workflow." subtitle="Limits are enforced by the same rules used by search, reports and property management." />
-      <div className="info-box">Current usage: <b>{propertyCount} properties</b> and <b>{photoCount} photos</b>. Existing data is preserved if you move to Basic.</div>
+      <PageTitle
+        eyebrow="ROOM TO GROW"
+        title="Two clear plans. One complete workflow."
+        subtitle="Limits are enforced by the same rules used by search, reports and property management."
+      />
+      <div className="info-box">
+        Current usage: <b>{propertyCount} properties</b> and{" "}
+        <b>{photoCount} photos</b>. Existing data is preserved if you move to
+        Basic.
+      </div>
       <ErrorBox error={listings.error} />
       <div className="plans">
         {(config.plans || []).map((plan: any) => (
-          <article className={plan.code === "Advanced" ? "featured" : ""} key={plan.code}>
+          <article
+            className={plan.code === "Advanced" ? "featured" : ""}
+            key={plan.code}
+          >
             {plan.code === "Advanced" && <Badge>PRIORITY PLAN</Badge>}
-            <h2>{plan.name}</h2><p>{plan.description}</p>
-            <strong>{money(plan.price)}<small> / month</small></strong>
-            <ul>{features[plan.code].map((item: string) => <li key={item}><Check size={17} />{item}</li>)}</ul>
-            <button className={`button full ${plan.code === "Basic" ? "secondary" : ""}`} disabled={user?.plan === plan.code || !config.demo} onClick={() => setSelected(plan.code)}>
-              {user?.plan === plan.code ? "Your current plan" : plan.code === "Advanced" ? "Upgrade to Advanced" : "Move to Basic"}
+            <h2>{plan.name}</h2>
+            <p>{plan.description}</p>
+            <strong>
+              {money(plan.price)}
+              <small> / month</small>
+            </strong>
+            <ul>
+              {features[plan.code].map((item: string) => (
+                <li key={item}>
+                  <Check size={17} />
+                  {item}
+                </li>
+              ))}
+            </ul>
+            <button
+              className={`button full ${plan.code === "Basic" ? "secondary" : ""}`}
+              disabled={user?.plan === plan.code || !config.demo}
+              onClick={() => setSelected(plan.code)}
+            >
+              {user?.plan === plan.code
+                ? "Your current plan"
+                : plan.code === "Advanced"
+                  ? "Upgrade to Advanced"
+                  : "Move to Basic"}
             </button>
             <small>Simulated plan · no recurring charge</small>
           </article>
         ))}
       </div>
-      {selected === "Advanced" && <SubscriptionCheckout onClose={() => setSelected("")} />}
+      {selected === "Advanced" && (
+        <SubscriptionCheckout onClose={() => setSelected("")} />
+      )}
       {selected === "Basic" && (
         <Modal title="Move to Basic?" onClose={() => setSelected("")}>
-          <p>Your properties and bookings remain intact. Basic limits apply to new properties, new photos, discounts and report exports.</p>
-          {propertyCount > 1 && <div className="info-box">Your {propertyCount} properties remain active, but you cannot add another property while Basic is active.</div>}
-          <button className="button" disabled={busy} onClick={async () => {
-            setBusy(true);
-            try {
-              await api("/owner/subscription", "POST", { plan: "Basic" });
-              await refresh();
-              await listings.load();
-              setSelected("");
-              toast("Basic plan activated. Existing data was preserved.");
-            } catch (e) { toast((e as Error).message); }
-            finally { setBusy(false); }
-          }}>{busy ? "Updating…" : "Confirm Basic plan"}</button>
+          <p>
+            Your properties and bookings remain intact. Basic limits apply to
+            new properties, new photos, discounts and report exports.
+          </p>
+          {propertyCount > 1 && (
+            <div className="info-box">
+              Your {propertyCount} properties remain active, but you cannot add
+              another property while Basic is active.
+            </div>
+          )}
+          <button
+            className="button"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await api("/owner/subscription", "POST", { plan: "Basic" });
+                await refresh();
+                await listings.load();
+                setSelected("");
+                toast("Basic plan activated. Existing data was preserved.");
+              } catch (e) {
+                toast((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? "Updating…" : "Confirm Basic plan"}
+          </button>
         </Modal>
       )}
     </div>

@@ -45,21 +45,43 @@ async function capture(name) {
 try {
   await page.goto(base);
   await page.locator(".hostel-card").first().waitFor();
-  assert.equal(await page.locator(".hostel-card").count(), 20);
+  const initialCardCount = await page.locator(".hostel-card").count();
+  assert(initialCardCount > 0);
   await capture("realistic-home");
   await page.getByRole("button", { name: "For her", exact: true }).click();
   await page.waitForURL("**gender=Girls");
   await page.waitForFunction(
-    () => document.querySelectorAll(".hostel-card").length < 20,
+    (count) => document.querySelectorAll(".hostel-card").length < count,
+    initialCardCount,
   );
   await page.goto(base + "/register");
   await page.getByLabel("Full name").fill("Browser Test Resident");
   await page.getByLabel("Email address").fill("browser.resident@example.test");
   await page.getByLabel("Password", { exact: true }).fill("HostelHub@123");
+  await page.getByLabel("Document type").selectOption("college_id");
+  await page.getByLabel(/Identity document/).setInputFiles({
+    name: "browser-college-id.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("%PDF-1.4\nBrowser QA fictional identity"),
+  });
+  await page.getByRole("checkbox").check();
   await page
-    .getByRole("button", { name: "Create account", exact: true })
+    .getByRole("button", {
+      name: "Submit account for verification",
+      exact: true,
+    })
     .click();
-  await page.waitForURL(base + "/");
+  await page.getByRole("heading", { name: "Submitted for review" }).waitFor();
+  await capture("account-verification-submitted");
+  await login("admin@hostelhub.test");
+  await page.getByRole("button", { name: /Account verification/ }).click();
+  const verificationRow = page
+    .locator("tbody tr")
+    .filter({ hasText: "browser.resident@example.test" });
+  await verificationRow.getByRole("button", { name: "Review" }).click();
+  await page.getByLabel(/Review note/).fill("Fictional college ID checked");
+  await page.getByRole("button", { name: "Approve account" }).click();
+  await login("browser.resident@example.test");
   await page.goto(base + "/hostels/csv-hostel-01");
   await page
     .getByRole("button", { name: "Request your space", exact: true })

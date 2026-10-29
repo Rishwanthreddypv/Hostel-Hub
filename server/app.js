@@ -6,7 +6,13 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import multer from "multer";
 import { randomUUID, randomBytes } from "node:crypto";
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  writeFileSync,
+  existsSync,
+  readFileSync,
+  unlinkSync,
+} from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -64,6 +70,25 @@ const facilityNames = [
   "Housekeeping",
   "Kitchen",
 ];
+const identityDocumentTypes = [
+  "masked_aadhaar",
+  "college_id",
+  "employee_id",
+  "driving_licence",
+  "passport",
+  "other_government_id",
+];
+const identityFields = z.object({
+  name: text(120),
+  email: z
+    .email()
+    .max(190)
+    .transform((v) => v.toLowerCase()),
+  password: z.string().min(10).max(72),
+  role: z.enum(["user", "owner"]),
+  document_type: z.enum(identityDocumentTypes),
+  consent: z.literal("true"),
+});
 const hostelSchema = z.object({
   name: text(160),
   city: text(80),
@@ -260,6 +285,10 @@ export function createApp(db, options = {}) {
     standardHeaders: true,
     legacyHeaders: false,
   });
+  const identityUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 8 },
+  });
   app.get("/api/health", (req, res) =>
     res.json({ ok: true, payments: demo ? "demo" : "disabled" }),
   );
@@ -280,47 +309,165 @@ export function createApp(db, options = {}) {
   app.get("/api/auth/me", (req, res) =>
     res.json({ user: publicUser(req.user) }),
   );
-  app.post("/api/auth/register", loginLimit, async (req, res) => {
-    const data = z
-      .object({
-        name: text(120),
-        email: z
-          .email()
-          .max(190)
-          .transform((v) => v.toLowerCase()),
-        password: z.string().min(10).max(72),
-        role: z.enum(["user", "owner"]),
-      })
-      .parse(req.body);
-    if (await db.get("SELECT id FROM users WHERE email=?", [data.email]))
-      fail(409, "An account with this email already exists");
-    const user = {
-      id: id(),
-      ...data,
-      password: await bcrypt.hash(data.password, 12),
-      token_version: 0,
-    };
-    await db.transaction(async (tx) => {
-      await tx.run(
-        "INSERT INTO users (id,name,email,password,role,bio,created_at) VALUES (?,?,?,?,?,?,?)",
-        [user.id, user.name, user.email, user.password, user.role, "", now()],
-      );
-      await notify(
-        tx,
-        user.id,
-        "Welcome to Hostel Hub",
-        user.role === "owner"
-          ? "Create a listing and upload documents for admin verification."
-          : "Your next chapter starts here.",
-      );
-    });
-    cookie(res, user);
-    res.status(201).json({
-      user: publicUser(
-        await db.get("SELECT * FROM users WHERE id=?", [user.id]),
-      ),
-    });
-  });
+  app.post(
+    "/api/auth/register",
+    loginLimit,
+    identityUpload.single("document"),
+    async (req, res) => {
+      const data = identityFields.parse(req.body);
+      const fileType = req.file && typeOfFile(req.file.buffer);
+      if (!fileType || fileType[0] === "webp")
+        fail(400, "Upload a JPEG, PNG or PDF identity document (up to 5 MB)");
+      if (await db.get("SELECT id FROM users WHERE email=?", [data.email]))
+        fail(409, "An account with this email already exists");
+      const user = {
+        id: id(),
+        name: data.name,
+        email: data.email,
+        role: data.role,
+        password: await bcrypt.hash(data.password, 12),
+        token_version: 0,
+      };
+      const verificationId = id();
+      const filename = `${verificationId}.${fileType[0]}`;
+      const documentPath = join(uploads, "private", filename);
+      writeFileSync(documentPath, req.file.buffer);
+      try {
+        await db.transaction(async (tx) => {
+          const createdAt = now();
+          await tx.run(
+            "INSERT INTO users (id,name,email,password,role,bio,status,created_at) VALUES (?,?,?,?,?,?,?,?)",
+            [
+              user.id,
+              user.name,
+              user.email,
+              user.password,
+              user.role,
+              "",
+              "pending_verification",
+              createdAt,
+            ],
+          );
+          await tx.run(
+            "INSERT INTO identity_verifications (id,user_id,document_type,name,path,mime,status,review_note,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [
+              verificationId,
+              user.id,
+              data.document_type,
+              req.file.originalname.slice(0, 255),
+              filename,
+              fileType[1],
+              "pending",
+              "",
+              createdAt,
+              createdAt,
+            ],
+          );
+          for (const admin of await tx.all(
+            "SELECT id FROM users WHERE role='admin' AND status='active'",
+          ))
+            await notify(
+              tx,
+              admin.id,
+              "New account verification",
+              `${user.name} registered as ${user.role} and is ready for review.`,
+            );
+        });
+      } catch (error) {
+        if (existsSync(documentPath)) unlinkSync(documentPath);
+        throw error;
+      }
+      res.status(201).json({
+        user: publicUser(
+          await db.get("SELECT * FROM users WHERE id=?", [user.id]),
+        ),
+        verification: { id: verificationId, status: "pending" },
+        message:
+          "Your identity document was submitted for administrator review.",
+      });
+    },
+  );
+  app.post(
+    "/api/auth/verification/resubmit",
+    loginLimit,
+    identityUpload.single("document"),
+    async (req, res) => {
+      const data = z
+        .object({
+          email: z.email().transform((v) => v.toLowerCase()),
+          password: z.string().max(72),
+          document_type: z.enum(identityDocumentTypes),
+          consent: z.literal("true"),
+        })
+        .parse(req.body);
+      const user = await db.get("SELECT * FROM users WHERE email=?", [
+        data.email,
+      ]);
+      if (!user || !(await bcrypt.compare(data.password, user.password)))
+        fail(401, "Email or password is incorrect");
+      if (user.status === "active")
+        fail(409, "This account is already verified and active");
+      if (!["pending_verification", "rejected"].includes(user.status))
+        fail(403, "This account cannot resubmit identity verification");
+      const fileType = req.file && typeOfFile(req.file.buffer);
+      if (!fileType || fileType[0] === "webp")
+        fail(400, "Upload a JPEG, PNG or PDF identity document (up to 5 MB)");
+      const filename = `${id()}.${fileType[0]}`;
+      const documentPath = join(uploads, "private", filename);
+      writeFileSync(documentPath, req.file.buffer);
+      let replacedPath = "";
+      try {
+        await db.transaction(async (tx) => {
+          const lockedUser = await tx.get(
+            "SELECT * FROM users WHERE id=?" + tx.lock,
+            [user.id],
+          );
+          if (!["pending_verification", "rejected"].includes(lockedUser.status))
+            fail(409, "Account verification status changed. Sign in again.");
+          const verification = await tx.get(
+            "SELECT * FROM identity_verifications WHERE user_id=?" + tx.lock,
+            [user.id],
+          );
+          if (!verification) fail(404, "Verification record not found");
+          replacedPath = verification.path;
+          const updatedAt = now();
+          await tx.run(
+            "UPDATE users SET status='pending_verification',token_version=token_version+1 WHERE id=?",
+            [user.id],
+          );
+          await tx.run(
+            "UPDATE identity_verifications SET document_type=?,name=?,path=?,mime=?,status='pending',review_note='',reviewed_by=NULL,reviewed_at='',updated_at=? WHERE id=?",
+            [
+              data.document_type,
+              req.file.originalname.slice(0, 255),
+              filename,
+              fileType[1],
+              updatedAt,
+              verification.id,
+            ],
+          );
+          for (const admin of await tx.all(
+            "SELECT id FROM users WHERE role='admin' AND status='active'",
+          ))
+            await notify(
+              tx,
+              admin.id,
+              "Identity verification resubmitted",
+              `${user.name} replaced their identity document.`,
+            );
+        });
+      } catch (error) {
+        if (existsSync(documentPath)) unlinkSync(documentPath);
+        throw error;
+      }
+      const oldPath = join(uploads, "private", replacedPath);
+      if (existsSync(oldPath)) unlinkSync(oldPath);
+      res.json({
+        ok: true,
+        message: "Your replacement document was submitted for review.",
+      });
+    },
+  );
   app.post("/api/auth/login", loginLimit, async (req, res) => {
     const data = z
       .object({
@@ -331,6 +478,21 @@ export function createApp(db, options = {}) {
     const u = await db.get("SELECT * FROM users WHERE email=?", [data.email]);
     if (!u || !(await bcrypt.compare(data.password, u.password)))
       fail(401, "Email or password is incorrect");
+    if (u.status === "pending_verification")
+      fail(
+        403,
+        "Your identity verification is awaiting administrator approval.",
+      );
+    if (u.status === "rejected") {
+      const verification = await db.get(
+        "SELECT review_note FROM identity_verifications WHERE user_id=?",
+        [u.id],
+      );
+      fail(
+        403,
+        `Your identity verification was rejected${verification?.review_note ? `: ${verification.review_note}` : "."} Replace the document and resubmit.`,
+      );
+    }
     if (u.status !== "active")
       fail(403, "Your account is suspended. Contact support.");
     cookie(res, u);
@@ -991,10 +1153,18 @@ export function createApp(db, options = {}) {
     });
   });
   app.post("/api/owner/hostels", auth("owner"), async (req, res) => {
-    const hostelCount = (await db.get("SELECT COUNT(*) AS c FROM hostels WHERE owner_id=?", [req.user.id])).c;
+    const hostelCount = (
+      await db.get("SELECT COUNT(*) AS c FROM hostels WHERE owner_id=?", [
+        req.user.id,
+      ])
+    ).c;
     const ownerPlan = planFor(req.user.plan);
     const maxProperties = ownerPlan.maxProperties;
-    if (hostelCount >= maxProperties) fail(403, `Your ${req.user.plan} plan allows up to ${maxProperties} properties.`);
+    if (hostelCount >= maxProperties)
+      fail(
+        403,
+        `Your ${req.user.plan} plan allows up to ${maxProperties} properties.`,
+      );
     const { rooms, ...data } = z
       .object({
         ...hostelSchema.shape,
@@ -1002,7 +1172,8 @@ export function createApp(db, options = {}) {
       })
       .parse(req.body);
     const maxPhotos = ownerPlan.maxPhotosPerProperty;
-    if (data.photos.length > maxPhotos) fail(400, `Your ${req.user.plan} plan allows up to ${maxPhotos} photos.`);
+    if (data.photos.length > maxPhotos)
+      fail(400, `Your ${req.user.plan} plan allows up to ${maxPhotos} photos.`);
     if (!ownerPlan.specialOffers && data.discount > 0)
       fail(403, "Special offers are available on the Advanced plan");
     const hostelId = id();
@@ -1062,7 +1233,10 @@ export function createApp(db, options = {}) {
       .parse(req.body);
     const old = JSON.parse(h.photos);
     if (d.photos.length > maxPhotos && d.photos.length > old.length)
-      fail(400, `Your ${req.user.plan} plan allows up to ${maxPhotos} photos. Existing photos are preserved, but new photos cannot be added.`);
+      fail(
+        400,
+        `Your ${req.user.plan} plan allows up to ${maxPhotos} photos. Existing photos are preserved, but new photos cannot be added.`,
+      );
     if (!ownerPlan.specialOffers && d.discount > 0 && d.discount > h.discount)
       fail(403, "Special offers are available on the Advanced plan");
     if (
@@ -1192,6 +1366,21 @@ export function createApp(db, options = {}) {
     res.set("Cache-Control", "no-store");
     res.type(d.mime).download(join(uploads, "private", d.path), d.name);
   });
+  app.get(
+    "/api/identity-verifications/:id/document",
+    auth("admin"),
+    async (req, res) => {
+      const verification = await db.get(
+        "SELECT * FROM identity_verifications WHERE id=?",
+        [req.params.id],
+      );
+      if (!verification) fail(404, "Identity document not found");
+      const filePath = join(uploads, "private", verification.path);
+      if (!existsSync(filePath)) fail(404, "Identity document file not found");
+      res.set("Cache-Control", "no-store");
+      res.type(verification.mime).download(filePath, verification.name);
+    },
+  );
   app.post("/api/owner/hostels/:id/submit", auth("owner"), async (req, res) => {
     const h = await owned(req, req.params.id);
     if (!(await db.get("SELECT id FROM documents WHERE hostel_id=?", [h.id])))
@@ -1207,86 +1396,174 @@ export function createApp(db, options = {}) {
     });
     res.json({ ok: true });
   });
-  app.get("/api/owner/subscription-attempts", auth("owner"), async (req, res) => {
-    res.json({
-      attempts: await db.all(
-        "SELECT * FROM subscription_attempts WHERE owner_id=? ORDER BY created_at DESC LIMIT 20",
-        [req.user.id],
-      ),
-    });
-  });
-  app.post("/api/owner/subscription-attempts", auth("owner"), async (req, res) => {
-    if (!demo) fail(503, "Demo subscriptions are disabled");
-    const d = z
-      .object({
-        plan: z.literal("Advanced"),
-        method: z.enum(["upi", "card", "netbanking"]),
-        outcome: z.enum(["success", "failure"]),
-        idempotency_key: z.string().uuid(),
-      })
-      .strict()
-      .parse(req.body);
-    if (req.user.plan === d.plan) fail(409, "You are already on this plan");
-    const attempt = await db.transaction(async (tx) => {
-      const prior = await tx.get("SELECT * FROM subscription_attempts WHERE idempotency_key=?", [d.idempotency_key]);
-      if (prior) {
-        if (prior.owner_id !== req.user.id || prior.plan_code !== d.plan || prior.method !== d.method || prior.outcome !== d.outcome)
-          fail(409, "This request key was already used for a different subscription payment");
-        return prior;
-      }
-      const running = await tx.get("SELECT * FROM subscription_attempts WHERE owner_id=? AND status='processing'", [req.user.id]);
-      if (running) return running;
-      const at = now();
-      const attempt = {
-        id: id(), owner_id: req.user.id, plan_code: d.plan,
-        idempotency_key: d.idempotency_key, method: d.method,
-        outcome: d.outcome, status: "processing", amount: PLANS.Advanced.price,
-        reference: "", created_at: at,
-        ready_at: new Date(Date.now() + 1500).toISOString(), completed_at: "",
-      };
-      await tx.run(
-        "INSERT INTO subscription_attempts (id,owner_id,plan_code,idempotency_key,method,outcome,status,amount,reference,created_at,ready_at,completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        Object.values(attempt),
-      );
-      await audit(tx, req.user.id, "plan.payment_started", attempt.id, `${d.plan} demo ${d.method} payment processing.`);
-      return attempt;
-    });
-    res.status(201).json({ attempt });
-  });
-  app.post("/api/subscription-attempts/:id/complete", auth("owner"), async (req, res) => {
-    if (!demo) fail(503, "Demo subscriptions are disabled");
-    const result = await db.transaction(async (tx) => {
-      const attempt = await tx.get("SELECT * FROM subscription_attempts WHERE id=?" + tx.lock, [req.params.id]);
-      if (!attempt || attempt.owner_id !== req.user.id) fail(404, "Subscription payment attempt not found");
-      if (attempt.status !== "processing") return { attempt };
-      if (Date.parse(attempt.ready_at) > Date.now()) return { attempt };
-      const status = attempt.outcome === "success" ? "paid" : "failed";
-      const completed = now();
-      let reference = "";
-      let payment = null;
-      if (status === "paid") {
-        reference = `PLAN-${id()}`;
-        const paymentId = id();
-        await tx.run("UPDATE users SET plan='Advanced' WHERE id=?", [req.user.id]);
-        await tx.run(
-          "INSERT INTO payments (id,booking_id,user_id,kind,amount,status,provider,reference,created_at,method,plan_code) VALUES (?,NULL,?,?,?,?,?,?,?,?,?)",
-          [paymentId, req.user.id, "subscription", attempt.amount, "paid", "demo", reference, completed, attempt.method, "Advanced"],
+  app.get(
+    "/api/owner/subscription-attempts",
+    auth("owner"),
+    async (req, res) => {
+      res.json({
+        attempts: await db.all(
+          "SELECT * FROM subscription_attempts WHERE owner_id=? ORDER BY created_at DESC LIMIT 20",
+          [req.user.id],
+        ),
+      });
+    },
+  );
+  app.post(
+    "/api/owner/subscription-attempts",
+    auth("owner"),
+    async (req, res) => {
+      if (!demo) fail(503, "Demo subscriptions are disabled");
+      const d = z
+        .object({
+          plan: z.literal("Advanced"),
+          method: z.enum(["upi", "card", "netbanking"]),
+          outcome: z.enum(["success", "failure"]),
+          idempotency_key: z.string().uuid(),
+        })
+        .strict()
+        .parse(req.body);
+      if (req.user.plan === d.plan) fail(409, "You are already on this plan");
+      const attempt = await db.transaction(async (tx) => {
+        const prior = await tx.get(
+          "SELECT * FROM subscription_attempts WHERE idempotency_key=?",
+          [d.idempotency_key],
         );
-        payment = { id: paymentId, reference, amount: attempt.amount, plan_code: "Advanced" };
-        await notify(tx, req.user.id, "Advanced plan activated", "Your Advanced demo plan is active. No real money was charged.");
-        await audit(tx, req.user.id, "plan.activated", req.user.id, `Advanced plan activated with ${attempt.method}; reference ${reference}.`);
-      } else {
-        await audit(tx, req.user.id, "plan.payment_failed", attempt.id, "Advanced plan payment declined by the demo simulator.");
-      }
-      await tx.run("UPDATE subscription_attempts SET status=?,reference=?,completed_at=? WHERE id=?", [status, reference, completed, attempt.id]);
-      return { attempt: { ...attempt, status, reference, completed_at: completed }, payment };
-    });
-    res.json(result);
-  });
+        if (prior) {
+          if (
+            prior.owner_id !== req.user.id ||
+            prior.plan_code !== d.plan ||
+            prior.method !== d.method ||
+            prior.outcome !== d.outcome
+          )
+            fail(
+              409,
+              "This request key was already used for a different subscription payment",
+            );
+          return prior;
+        }
+        const running = await tx.get(
+          "SELECT * FROM subscription_attempts WHERE owner_id=? AND status='processing'",
+          [req.user.id],
+        );
+        if (running) return running;
+        const at = now();
+        const attempt = {
+          id: id(),
+          owner_id: req.user.id,
+          plan_code: d.plan,
+          idempotency_key: d.idempotency_key,
+          method: d.method,
+          outcome: d.outcome,
+          status: "processing",
+          amount: PLANS.Advanced.price,
+          reference: "",
+          created_at: at,
+          ready_at: new Date(Date.now() + 1500).toISOString(),
+          completed_at: "",
+        };
+        await tx.run(
+          "INSERT INTO subscription_attempts (id,owner_id,plan_code,idempotency_key,method,outcome,status,amount,reference,created_at,ready_at,completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+          Object.values(attempt),
+        );
+        await audit(
+          tx,
+          req.user.id,
+          "plan.payment_started",
+          attempt.id,
+          `${d.plan} demo ${d.method} payment processing.`,
+        );
+        return attempt;
+      });
+      res.status(201).json({ attempt });
+    },
+  );
+  app.post(
+    "/api/subscription-attempts/:id/complete",
+    auth("owner"),
+    async (req, res) => {
+      if (!demo) fail(503, "Demo subscriptions are disabled");
+      const result = await db.transaction(async (tx) => {
+        const attempt = await tx.get(
+          "SELECT * FROM subscription_attempts WHERE id=?" + tx.lock,
+          [req.params.id],
+        );
+        if (!attempt || attempt.owner_id !== req.user.id)
+          fail(404, "Subscription payment attempt not found");
+        if (attempt.status !== "processing") return { attempt };
+        if (Date.parse(attempt.ready_at) > Date.now()) return { attempt };
+        const status = attempt.outcome === "success" ? "paid" : "failed";
+        const completed = now();
+        let reference = "";
+        let payment = null;
+        if (status === "paid") {
+          reference = `PLAN-${id()}`;
+          const paymentId = id();
+          await tx.run("UPDATE users SET plan='Advanced' WHERE id=?", [
+            req.user.id,
+          ]);
+          await tx.run(
+            "INSERT INTO payments (id,booking_id,user_id,kind,amount,status,provider,reference,created_at,method,plan_code) VALUES (?,NULL,?,?,?,?,?,?,?,?,?)",
+            [
+              paymentId,
+              req.user.id,
+              "subscription",
+              attempt.amount,
+              "paid",
+              "demo",
+              reference,
+              completed,
+              attempt.method,
+              "Advanced",
+            ],
+          );
+          payment = {
+            id: paymentId,
+            reference,
+            amount: attempt.amount,
+            plan_code: "Advanced",
+          };
+          await notify(
+            tx,
+            req.user.id,
+            "Advanced plan activated",
+            "Your Advanced demo plan is active. No real money was charged.",
+          );
+          await audit(
+            tx,
+            req.user.id,
+            "plan.activated",
+            req.user.id,
+            `Advanced plan activated with ${attempt.method}; reference ${reference}.`,
+          );
+        } else {
+          await audit(
+            tx,
+            req.user.id,
+            "plan.payment_failed",
+            attempt.id,
+            "Advanced plan payment declined by the demo simulator.",
+          );
+        }
+        await tx.run(
+          "UPDATE subscription_attempts SET status=?,reference=?,completed_at=? WHERE id=?",
+          [status, reference, completed, attempt.id],
+        );
+        return {
+          attempt: { ...attempt, status, reference, completed_at: completed },
+          payment,
+        };
+      });
+      res.json(result);
+    },
+  );
   app.post("/api/owner/subscription", auth("owner"), async (req, res) => {
     if (!demo) fail(503, "Demo subscriptions are disabled");
-    const { plan } = z.object({ plan: z.enum(PLAN_NAMES) }).strict().parse(req.body);
-    if (plan !== "Basic") fail(400, "Use the simulated checkout to activate Advanced");
+    const { plan } = z
+      .object({ plan: z.enum(PLAN_NAMES) })
+      .strict()
+      .parse(req.body);
+    if (plan !== "Basic")
+      fail(400, "Use the simulated checkout to activate Advanced");
     if (req.user.plan === plan) fail(409, "You are already on this plan");
     await db.transaction(async (tx) => {
       await tx.run("UPDATE users SET plan='Basic' WHERE id=?", [req.user.id]);
@@ -1294,27 +1571,55 @@ export function createApp(db, options = {}) {
         "UPDATE subscription_attempts SET status='cancelled',completed_at=? WHERE owner_id=? AND status='processing'",
         [now(), req.user.id],
       );
-      await notify(tx, req.user.id, "Basic plan activated", "Your properties and bookings were preserved. Basic limits now apply to new additions.");
-      await audit(tx, req.user.id, "plan.downgraded", req.user.id, "Advanced to Basic; existing listings preserved.");
+      await notify(
+        tx,
+        req.user.id,
+        "Basic plan activated",
+        "Your properties and bookings were preserved. Basic limits now apply to new additions.",
+      );
+      await audit(
+        tx,
+        req.user.id,
+        "plan.downgraded",
+        req.user.id,
+        "Advanced to Basic; existing listings preserved.",
+      );
     });
     res.json({ ok: true });
   });
-  app.get("/api/subscription-payments/:id/receipt", auth("owner", "admin"), async (req, res) => {
-    const payment = await db.get(
-      "SELECT p.*,u.name,u.email FROM payments p JOIN users u ON u.id=p.user_id WHERE p.id=? AND p.kind='subscription'",
-      [req.params.id],
-    );
-    if (!payment || (req.user.role !== "admin" && payment.user_id !== req.user.id))
-      fail(404, "Subscription receipt not found");
-    res.type("text/plain").attachment(`hostel-hub-plan-${payment.reference}.txt`).send([
-      "HOSTEL HUB — DEMO SUBSCRIPTION RECEIPT",
-      "No real money was transferred.", "",
-      `Reference: ${payment.reference}`, `Owner: ${payment.name}`,
-      `Email: ${payment.email}`, `Plan: ${payment.plan_code || "Advanced"}`,
-      `Method: ${payment.method.toUpperCase()}`, `Amount: INR ${payment.amount}`,
-      `Status: ${payment.status}`, `Date: ${payment.created_at}`,
-    ].join("\r\n"));
-  });
+  app.get(
+    "/api/subscription-payments/:id/receipt",
+    auth("owner", "admin"),
+    async (req, res) => {
+      const payment = await db.get(
+        "SELECT p.*,u.name,u.email FROM payments p JOIN users u ON u.id=p.user_id WHERE p.id=? AND p.kind='subscription'",
+        [req.params.id],
+      );
+      if (
+        !payment ||
+        (req.user.role !== "admin" && payment.user_id !== req.user.id)
+      )
+        fail(404, "Subscription receipt not found");
+      res
+        .type("text/plain")
+        .attachment(`hostel-hub-plan-${payment.reference}.txt`)
+        .send(
+          [
+            "HOSTEL HUB — DEMO SUBSCRIPTION RECEIPT",
+            "No real money was transferred.",
+            "",
+            `Reference: ${payment.reference}`,
+            `Owner: ${payment.name}`,
+            `Email: ${payment.email}`,
+            `Plan: ${payment.plan_code || "Advanced"}`,
+            `Method: ${payment.method.toUpperCase()}`,
+            `Amount: INR ${payment.amount}`,
+            `Status: ${payment.status}`,
+            `Date: ${payment.created_at}`,
+          ].join("\r\n"),
+        );
+    },
+  );
 
   app.get("/api/notifications", auth(), async (req, res) =>
     res.json({
@@ -1432,13 +1737,25 @@ export function createApp(db, options = {}) {
       ? { basic_owners: 0, advanced_owners: 0, subscription_revenue: 0 }
       : {
           basic_owners: Number(
-            (await db.get("SELECT COUNT(*) c FROM users WHERE role='owner' AND plan='Basic'")).c,
+            (
+              await db.get(
+                "SELECT COUNT(*) c FROM users WHERE role='owner' AND plan='Basic'",
+              )
+            ).c,
           ),
           advanced_owners: Number(
-            (await db.get("SELECT COUNT(*) c FROM users WHERE role='owner' AND plan='Advanced'")).c,
+            (
+              await db.get(
+                "SELECT COUNT(*) c FROM users WHERE role='owner' AND plan='Advanced'",
+              )
+            ).c,
           ),
           subscription_revenue: Number(
-            (await db.get("SELECT COALESCE(SUM(amount),0) total FROM payments WHERE kind='subscription' AND status='paid'")).total,
+            (
+              await db.get(
+                "SELECT COALESCE(SUM(amount),0) total FROM payments WHERE kind='subscription' AND status='paid'",
+              )
+            ).total,
           ),
         };
     res.json({
@@ -1461,6 +1778,15 @@ export function createApp(db, options = {}) {
           .reduce((sum, b) => sum + Number(b.refund_amount), 0),
         revenue: Number(revenue.total),
         pending: hostels.filter((h) => h.status === "pending").length,
+        pending_accounts: owner
+          ? 0
+          : Number(
+              (
+                await db.get(
+                  "SELECT COUNT(*) AS c FROM identity_verifications WHERE status='pending'",
+                )
+              ).c,
+            ),
         occupancy: bookings
           .filter(
             (b) =>
@@ -1483,6 +1809,11 @@ export function createApp(db, options = {}) {
         ? []
         : (await db.all("SELECT * FROM users ORDER BY created_at DESC")).map(
             publicUser,
+          ),
+      identity_verifications: owner
+        ? []
+        : await db.all(
+            "SELECT v.*,u.name AS user_name,u.email AS user_email,u.role AS user_role,u.status AS user_status,r.name AS reviewer_name FROM identity_verifications v JOIN users u ON u.id=v.user_id LEFT JOIN users r ON r.id=v.reviewed_by ORDER BY CASE WHEN v.status='pending' THEN 1 ELSE 2 END,v.updated_at DESC",
           ),
       reviews: owner
         ? []
@@ -1537,6 +1868,74 @@ export function createApp(db, options = {}) {
     });
     res.json({ ok: true });
   });
+  app.post(
+    "/api/admin/identity-verifications/:id/review",
+    auth("admin"),
+    async (req, res) => {
+      const data = z
+        .object({
+          status: z.enum(["approved", "rejected"]),
+          note: text(1000),
+        })
+        .parse(req.body);
+      await db.transaction(async (tx) => {
+        const verification = await tx.get(
+          "SELECT * FROM identity_verifications WHERE id=?" + tx.lock,
+          [req.params.id],
+        );
+        if (!verification) fail(404, "Identity verification not found");
+        if (verification.status !== "pending")
+          fail(409, "Only pending identity verifications can be reviewed");
+        if (
+          data.status === "approved" &&
+          !existsSync(join(uploads, "private", verification.path))
+        )
+          fail(
+            409,
+            "The identity document file is missing and cannot be approved",
+          );
+        const user = await tx.get("SELECT * FROM users WHERE id=?" + tx.lock, [
+          verification.user_id,
+        ]);
+        if (!user) fail(404, "Applicant account not found");
+        if (user.status !== "pending_verification")
+          fail(409, "Applicant is not awaiting identity verification");
+        const reviewedAt = now();
+        await tx.run(
+          "UPDATE identity_verifications SET status=?,review_note=?,reviewed_by=?,reviewed_at=?,updated_at=? WHERE id=?",
+          [
+            data.status,
+            data.note,
+            req.user.id,
+            reviewedAt,
+            reviewedAt,
+            verification.id,
+          ],
+        );
+        const userStatus = data.status === "approved" ? "active" : "rejected";
+        await tx.run(
+          "UPDATE users SET status=?,token_version=token_version+1 WHERE id=?",
+          [userStatus, user.id],
+        );
+        await notify(
+          tx,
+          user.id,
+          `Identity verification ${data.status}`,
+          data.status === "approved"
+            ? "Your account is active. You can now sign in."
+            : `Your document needs to be replaced: ${data.note}`,
+        );
+        await audit(
+          tx,
+          req.user.id,
+          `identity.${data.status}`,
+          user.id,
+          data.note,
+        );
+      });
+      res.json({ ok: true });
+    },
+  );
   app.post("/api/admin/users/:id/status", auth("admin"), async (req, res) => {
     const { status } = z
       .object({ status: z.enum(["active", "suspended"]) })
@@ -1545,6 +1944,8 @@ export function createApp(db, options = {}) {
     if (!u) fail(404, "User not found");
     if (u.role === "admin")
       fail(400, "Admin accounts cannot be suspended here");
+    if (!["active", "suspended"].includes(u.status))
+      fail(409, "Review this account through the verification queue");
     await db.transaction(async (tx) => {
       await tx.run(
         "UPDATE users SET status=?,token_version=token_version+1 WHERE id=?",
@@ -1720,7 +2121,7 @@ export function createApp(db, options = {}) {
     if (err instanceof multer.MulterError)
       return res
         .status(400)
-        .json({ error: "Upload must contain one file no larger than 8 MB" });
+        .json({ error: "Upload must contain one file within the allowed size" });
     if (err.status) return res.status(err.status).json({ error: err.message });
     if (/UNIQUE|Duplicate entry/.test(err.message))
       return res.status(409).json({ error: "This record already exists" });

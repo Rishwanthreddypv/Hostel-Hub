@@ -46,6 +46,9 @@ export async function migrate(db, mysql) {
   await db.run(
     `CREATE TABLE IF NOT EXISTS subscription_attempts (id VARCHAR(36) PRIMARY KEY, owner_id VARCHAR(36) NOT NULL, plan_code VARCHAR(20) NOT NULL, idempotency_key VARCHAR(100) NOT NULL UNIQUE, method VARCHAR(20) NOT NULL, outcome VARCHAR(20) NOT NULL, status VARCHAR(20) NOT NULL, amount INTEGER NOT NULL, reference VARCHAR(100) NOT NULL DEFAULT '', created_at VARCHAR(30) NOT NULL, ready_at VARCHAR(30) NOT NULL, completed_at VARCHAR(30) NOT NULL DEFAULT '', FOREIGN KEY(owner_id) REFERENCES users(id))`,
   );
+  await db.run(
+    `CREATE TABLE IF NOT EXISTS identity_verifications (id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(36) NOT NULL UNIQUE, document_type VARCHAR(40) NOT NULL, name VARCHAR(255) NOT NULL, path VARCHAR(255) NOT NULL, mime VARCHAR(80) NOT NULL, status VARCHAR(30) NOT NULL, review_note TEXT NOT NULL, reviewed_by VARCHAR(36), reviewed_at VARCHAR(30) NOT NULL DEFAULT '', created_at VARCHAR(30) NOT NULL, updated_at VARCHAR(30) NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(reviewed_by) REFERENCES users(id))`,
+  );
   // Pro was an early demo tier. Advanced is now the single paid tier and keeps
   // every former Pro owner's access without deleting listings or history.
   await db.run("UPDATE users SET plan='Advanced' WHERE plan='Pro'");

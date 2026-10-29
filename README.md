@@ -39,13 +39,13 @@ npm start
 
 The first local start creates the schema and demo dataset automatically. No database installation or API credentials are required. Copy `.env.example` to `.env` only when you want to override defaults.
 
-| Role | Email | Password |
-| --- | --- | --- |
-| Guest | `resident.001@hostelhub.test` | `HostelHub@123` |
-| Hostel owner | `priya.raman@hostelhub.test` | `HostelHub@123` |
-| Admin | `admin@hostelhub.test` | `HostelHub@123` |
+| Role         | Email                         | Password        |
+| ------------ | ----------------------------- | --------------- |
+| Guest        | `resident.001@hostelhub.test` | `HostelHub@123` |
+| Hostel owner | `priya.raman@hostelhub.test`  | `HostelHub@123` |
+| Admin        | `admin@hostelhub.test`        | `HostelHub@123` |
 
-The sign-in page has Guest, Owner and Admin shortcuts and an independent-account selector. Each owner has a separate login and owns several properties; other owners cannot access their bookings, payments or documents. You can register additional guests and owners. Public admin registration is unavailable. Existing demo accounts still work.
+The sign-in page has Guest, Owner and Admin shortcuts and an independent-account selector. Each owner has a separate login and owns several properties; other owners cannot access their bookings, payments or documents. New guest and owner registrations require a private JPEG, PNG or PDF identity document and remain pending until an admin approves them. Rejected applicants can replace the document and resubmit. Public admin registration is unavailable. Existing demo accounts remain active.
 
 The editable dataset contains **40 owners, 60 guests, 44 properties across several Indian cities, 176 room types and 480 bookings**, with related payment attempts, subscription payments, reviews, messages and history. All people and businesses are fictional. See the [CSV data guide](docs/CSV-DATA-GUIDE.md) for every file, account, validation rule and safe import command. Existing databases retain their earlier records alongside this dataset.
 
@@ -54,13 +54,13 @@ The editable dataset contains **40 owners, 60 guests, 44 properties across sever
 - Search by city, neighbourhood, hostel or nearby institution; filter budget, gender, AC, facilities, rating, room sharing, dates and distance from supplied coordinates. Sort by price or rating.
 - Photo galleries, facility lists, room types, deposits, discounts, check-in/out times, contact phone, nearby places and refund terms.
 - Interactive OpenStreetMap locations, Google Maps links, saved homes and comparison of up to three listings.
-- Registration/login, editable profiles, password change, booking history, cancellations and reviews after an eligible stay.
+- Registration with private identity upload, admin approval/rejection, rejected-document resubmission, login, editable profiles, password change, booking history, cancellations and reviews after an eligible stay.
 - Request 1–4 beds, receive owner approval, then pay the first month and deposit within 24 hours. Simulated UPI/card/net-banking checkout includes processing, decline/retry, payment references and downloadable receipts. Inventory uses quantity-weighted peak occupancy and transactional capacity checks.
 - Separate owner portfolios with property filters, residents, arrivals/departures, review and message summaries, gross collections, refunds and net collections. Admins can inspect CSV import history.
 - Booking workspaces with attention/refund queues, property/status filters, guest or booking-ID search, sorting and payment-hold countdowns. Owner/admin dashboards link directly to pending work.
 - Private booking timelines and payment references, required rejection reasons, optional cancellation notes, and exact refund previews checked again on submission. Lists refresh every 15 seconds while visible.
 - Owner property editor, image uploads, room pricing/capacity, document upload, submission for admin verification, booking decisions, payment activity and CSV export.
-- Admin verification, publication/rejection, member suspension, review moderation, complaint resolution, refund processing, analytics, payment history and audit history.
+- Admin account-identity and hostel-listing verification, approval/rejection, member suspension, review moderation, complaint resolution, refund processing, analytics, payment history and audit history.
 - In-app guest/owner messages, notifications refreshed every 20 seconds, support requests and a database-backed local search assistant.
 - Basic and Advanced plans with enforced property/photo limits, priority discovery, simulated upgrade checkout, downgrade preservation, receipts and an admin-visible subscription ledger.
 
@@ -73,13 +73,13 @@ The editable dataset contains **40 owners, 60 guests, 44 properties across sever
 5. Cancel it, review the exact refund amount and optionally leave a reason. Sign in as Admin, open the refund queue, and process the demo refund.
 6. Open **Booking details & history** to see the payment, owner decision, cancellation note and refund. Existing bookings are preserved; decisions made before history tracking was added have no fabricated timeline entries.
 
-To try listing verification, use the Owner account to add a property, upload an illustrative photo and sample registration document, then submit. Sign in as Admin to inspect the document and approve or request changes. Never upload real identity documents into this demo.
+To try account verification, register a new guest or owner with a fictional sample document, then sign in as Admin and open **Account verification**. Approve the account and use its new credentials to sign in. Rejecting the application exposes a replacement-document flow on the login page. To try listing verification, use an active Owner account to add a property, upload an illustrative photo and sample registration document, then submit. Never upload real identity documents into this demo.
 
 ## Persistence and backups
 
 - SQLite database: `data/hostel-hub.sqlite` (with WAL/SHM companion files while running).
 - Uploaded public photos: `uploads/`.
-- Private ownership documents: `uploads/private/`; accessible only through authenticated, role-checked API downloads.
+- Private account-identity and ownership documents: `uploads/private/`; inaccessible through the public upload route and downloadable only through authenticated, role-checked API endpoints.
 - Stop the application before copying the complete `data/` and `uploads/` directories for a consistent local backup. Keep their access restricted. Restore while the application is stopped.
 - CSV imports are transactional and idempotent. Managed profile/listing rows can receive CSV edits if unchanged in the application; live edits and existing booking/payment history are preserved. Tests use isolated databases. See the CSV guide before editing or importing.
 - A generated development JWT secret changes on server restart. Set a private `JWT_SECRET` in `.env` to preserve sessions across restarts.
@@ -113,16 +113,16 @@ The adapter follows the [official Chat Completions API request/response contract
 
 ## What is deliberately simulated or external
 
-| Capability | Delivered behavior |
-| --- | --- |
-| Payments/refunds | Working demo ledger and booking transitions. No Razorpay money movement. |
-| Provider plans | Basic is free with one property and eight photos. Advanced is a simulated ₹999 payment with ten properties, 200 photos, priority discovery, detailed analytics, booking exports and offers. No automatic renewal. |
-| AI assistant | Working local inventory search; optional generative adapter needs credentials and provider testing. |
-| Maps | OpenStreetMap tiles need internet. Google Maps opens an external location link; no paid Maps API key needed. |
-| Notifications/messages | Stored in-app and polled periodically; SMTP email and SMS delivery are not connected. |
-| Verification | Admin document-review workflow. Seeded verification is illustrative, not an assertion about real businesses. |
-| Photos | Local file uploads, up to 8 MB each and 200 references per listing. This is a bounded local gallery, not literally unlimited storage. |
-| Search visibility | Local search and listing pages; no guarantee of external search-engine rankings. |
+| Capability             | Delivered behavior                                                                                                                                                                                                |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Payments/refunds       | Working demo ledger and booking transitions. No Razorpay money movement.                                                                                                                                          |
+| Provider plans         | Basic is free with one property and eight photos. Advanced is a simulated ₹999 payment with ten properties, 200 photos, priority discovery, detailed analytics, booking exports and offers. No automatic renewal. |
+| AI assistant           | Working local inventory search; optional generative adapter needs credentials and provider testing.                                                                                                               |
+| Maps                   | OpenStreetMap tiles need internet. Google Maps opens an external location link; no paid Maps API key needed.                                                                                                      |
+| Notifications/messages | Stored in-app and polled periodically; SMTP email and SMS delivery are not connected.                                                                                                                             |
+| Verification           | Admin document-review workflow. Seeded verification is illustrative, not an assertion about real businesses.                                                                                                      |
+| Photos                 | Local file uploads, up to 8 MB each and 200 references per listing. This is a bounded local gallery, not literally unlimited storage.                                                                             |
+| Search visibility      | Local search and listing pages; no guarantee of external search-engine rankings.                                                                                                                                  |
 
 Live Razorpay support requires server-side order creation, signature verification, captured-payment webhook reconciliation, idempotent refunds, sandbox testing and merchant credentials. The [official Razorpay integration guide](https://razorpay.com/docs/payments/server-integration/nodejs/) describes that separate integration. Setting `DEMO_MODE=false` disables payment and subscription simulation; it does **not** activate real payments.
 

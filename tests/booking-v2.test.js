@@ -40,12 +40,28 @@ async function login(role = "user") {
 }
 async function register(role = "user") {
   const a = request.agent(app);
-  const r = await post(a, "/auth/register", {
-    name: "Independent Member",
-    email: randomUUID() + "@example.test",
+  const email = randomUUID() + "@example.test";
+  const r = await a
+    .post("/api/auth/register")
+    .set("X-HostelHub-Client", "test")
+    .field("name", "Independent Member")
+    .field("email", email)
+    .field("password", "StrongPass@123")
+    .field("role", role)
+    .field("document_type", "college_id")
+    .field("consent", "true")
+    .attach("document", Buffer.from("%PDF-1.4\nDemo identity"), "identity.pdf")
+    .expect(201);
+  const admin = await login("admin");
+  await post(
+    admin,
+    `/admin/identity-verifications/${r.body.verification.id}/review`,
+    { status: "approved", note: "Test identity verified" },
+  ).expect(200);
+  await post(a, "/auth/login", {
+    email,
     password: "StrongPass@123",
-    role,
-  }).expect(201);
+  }).expect(200);
   return { a, user: r.body.user };
 }
 async function book(a, extra = {}) {
